@@ -1,9 +1,31 @@
 """
 多模态代码生成 Agent（阿里云百炼版）
 
+这个文件是项目的“单文件可运行版”，适合课程答辩、功能演示和成员 C
+讲解 Agent/RAG 工作流。它把一个编程题自动求解过程拆成 5 个 Agent：
+
+1. 题目识别 Agent：接收文本或截图，把输入整理成结构化题面。
+2. 解题规划 Agent：结合 RAG 算法模板，判断题型并规划解法。
+3. 测试生成 Agent：先设计测试策略和边界用例，作为代码生成约束。
+4. 代码生成 Agent：综合题目、规划、模板、测试计划生成 Python 代码。
+5. 执行调试 Agent：本地执行代码，失败时最多调用模型自动修复 3 轮。
+
+注意：测试生成 Agent 在代码生成 Agent 之前运行，这是刻意设计的。
+这样代码生成阶段能提前知道要通过哪些测试，更接近真实开发流程。
+
+完整链路：
+用户输入文本/图片
+  -> 题目识别
+  -> 轻量 RAG 模板检索
+  -> 解题规划
+  -> 测试生成
+  -> 代码生成
+  -> 本地执行与自动调试
+  -> Streamlit 页面展示和 Markdown 项目报告
+
 运行方式：
-1. 安装 Streamlit：
-   pip install streamlit
+1. 安装依赖：
+   pip install -r requirements.txt
 2. 启动页面：
    streamlit run ai_coding_agent_bailian.py
 3. 配置环境变量（可选）：
@@ -36,6 +58,13 @@ DEFAULT_VISION_MODEL = "qwen3-vl-plus"
 
 @dataclass
 class AgentConfig:
+    """运行配置。
+
+    Streamlit 侧边栏、命令行入口和后端 API 层都可以用这个数据结构
+    创建同一套 Agent 配置。这样模型、超时、是否执行代码、是否兜底
+    都有统一入口，后续接 FastAPI 时也更容易复用。
+    """
+
     api_key: str = ""
     base_url: str = DEFAULT_BASE_URL
     text_model: str = DEFAULT_TEXT_MODEL
@@ -48,6 +77,14 @@ class AgentConfig:
 
 @dataclass
 class AgentStep:
+    """单个 Agent 步骤的可观测记录。
+
+    每个 Agent 执行完都会生成一条 AgentStep，保存名称、角色、输入摘要、
+    输出摘要、状态、耗时和错误信息。页面的“Agent 步骤”页签和报告中的
+    “Agent 步骤详情”都来自这里，这也是项目从 demo 变成可讲解工作流
+    的关键。
+    """
+
     name: str
     role: str
     status: str
@@ -59,6 +96,14 @@ class AgentStep:
 
 @dataclass
 class AgentResult:
+    """一次完整任务的最终结果。
+
+    solve_problem() 会返回这个对象。它同时包含最终答案（题目、说明、代码、
+    执行报告、项目文档）和过程数据（Agent 步骤、RAG 模板、测试计划、
+    修复记录、指标）。如果后续接前后端分离，后端主要就是把这个对象
+    转成前端需要的 JSON 字段。
+    """
+
     problem: str
     solution_markdown: str
     code: str
@@ -75,10 +120,14 @@ class AgentResult:
 
 
 def now_ms() -> int:
+    """返回当前毫秒时间戳，用于计算每个 Agent 的耗时。"""
+
     return int(time.time() * 1000)
 
 
 def shorten_text(text: Any, limit: int = 1200) -> str:
+    """压缩长文本，避免页面和报告里展示过长的 prompt 或模型输出。"""
+
     value = str(text or "").strip()
     if len(value) <= limit:
         return value
@@ -94,6 +143,12 @@ def build_step(
     status: str = "completed",
     error: str = "",
 ) -> AgentStep:
+    """统一创建 AgentStep。
+
+    统一入口的好处是所有步骤都能保持同样字段和同样截断规则，
+    后续前端展示、接口返回、报告生成不用分别处理各种格式。
+    """
+
     return AgentStep(
         name=name,
         role=role,
@@ -106,6 +161,8 @@ def build_step(
 
 
 def clean_base_url(base_url: str) -> str:
+    """整理百炼 OpenAI 兼容接口地址，保证后面能拼接 /chat/completions。"""
+
     base_url = (base_url or DEFAULT_BASE_URL).strip().rstrip("/")
     if not base_url.endswith("/v1"):
         return base_url
@@ -113,11 +170,18 @@ def clean_base_url(base_url: str) -> str:
 
 
 def image_to_data_url(image_bytes: bytes, mime_type: str) -> str:
+    """把上传截图转成视觉模型可接收的 data URL。"""
+
     mime_type = mime_type or "image/png"
     encoded = base64.b64encode(image_bytes).decode("utf-8")
     return f"data:{mime_type};base64,{encoded}"
 
 
+# 轻量 RAG 模板库。
+#
+# 这里没有引入向量数据库，而是先用一组常见算法模板覆盖课程项目和
+# 编程题高频场景。retrieve_algorithm_templates() 会按关键词命中数量
+# 做简单召回，再把模板交给“解题规划 Agent”和“代码生成 Agent”。
 ALGORITHM_TEMPLATES: List[Dict[str, Any]] = [
     {
         "id": "hash_table",
@@ -186,6 +250,18 @@ ALGORITHM_TEMPLATES: List[Dict[str, Any]] = [
 
 
 def retrieve_algorithm_templates(problem: str, top_k: int = 3) -> List[Dict[str, Any]]:
+    """根据题目关键词检索最相关的算法模板。
+
+    这是本项目的“轻量 RAG”。流程很直观：
+    1. 把题目转为小写。
+    2. 遍历内置算法模板。
+    3. 统计每个模板命中的关键词数量。
+    4. 按命中分数排序，返回 top_k 个模板。
+
+    如果完全没有命中，也会返回哈希表模板作为兜底参考，保证后续
+    解题规划 Agent 和代码生成 Agent 总能拿到一些结构化先验知识。
+    """
+
     text = (problem or "").lower()
     scored: List[Dict[str, Any]] = []
     for template in ALGORITHM_TEMPLATES:
@@ -224,6 +300,12 @@ def retrieve_algorithm_templates(problem: str, top_k: int = 3) -> List[Dict[str,
 
 
 def format_templates_for_prompt(templates: List[Dict[str, Any]]) -> str:
+    """把检索到的模板格式化成 prompt 文本。
+
+    大模型不直接读取 Python 字典，因此需要把模板名称、描述、解题套路、
+    命中关键词整理成可读文本，再拼进解题规划和代码生成的 prompt。
+    """
+
     lines = []
     for index, item in enumerate(templates, start=1):
         keywords = ", ".join(item.get("matched_keywords", [])) or "无明确命中"
@@ -242,6 +324,19 @@ def call_bailian_chat(
     messages: List[Dict[str, Any]],
     temperature: float = 0.2,
 ) -> str:
+    """调用阿里云百炼的 OpenAI 兼容 Chat Completions 接口。
+
+    这个函数是所有在线 Agent 的公共模型调用入口：
+    - 解题规划 Agent
+    - 测试生成 Agent
+    - 代码生成 Agent
+    - 执行调试 Agent
+    - 图片题目识别时的视觉模型调用
+
+    如果没有 API Key、网络失败、接口报错或响应格式异常，会抛出异常。
+    上层 Agent 会捕获异常并切换到离线兜底，避免页面空白。
+    """
+
     if not config.api_key.strip():
         raise RuntimeError("未填写阿里云百炼 API Key。")
 
@@ -284,6 +379,13 @@ def extract_problem_from_image(
     mime_type: str,
     extra_text: str = "",
 ) -> Tuple[str, bool]:
+    """题目识别 Agent 的图片分支。
+
+    当用户上传编程题截图时，系统先调用视觉模型，把图片中的题目名称、
+    题目描述、输入输出格式、样例、数据范围等信息提取为文本。这样后续
+    Agent 面对的是结构化题面，而不是原始图片。
+    """
+
     prompt = """
 你是编程题截图识别 Agent。请从图片中提取完整题意，并整理为结构化文本。
 
@@ -315,6 +417,12 @@ def extract_problem_from_image(
 
 
 def offline_plan_solution(problem: str, templates: List[Dict[str, Any]], reason: str = "") -> str:
+    """解题规划 Agent 的离线兜底版本。
+
+    当百炼 API 不可用时，仍然输出一份基础规划，并把 RAG 检索到的模板
+    写进结果。这样答辩或演示时即使没有额度，也能看到完整链路。
+    """
+
     template_text = format_templates_for_prompt(templates)
     note = f"\n\n> 规划兜底原因：{reason}" if reason else ""
     return f"""
@@ -337,6 +445,15 @@ def plan_solution_with_bailian(
     problem: str,
     templates: List[Dict[str, Any]],
 ) -> Tuple[str, bool]:
+    """解题规划 Agent。
+
+    输入：题目文本 + RAG 检索到的算法模板。
+    输出：题型判断、可用模板、解题步骤、边界条件、复杂度目标。
+
+    这一阶段不直接写代码，而是先确定“怎么做”。它的输出会继续传给
+    测试生成 Agent 和代码生成 Agent。
+    """
+
     system_prompt = """
 你是解题规划 Agent。你的任务不是直接写完整代码，而是先制定可执行的解题计划。
 
@@ -370,6 +487,19 @@ def generate_solution_with_bailian(
     templates: Optional[List[Dict[str, Any]]] = None,
     test_plan: str = "",
 ) -> Tuple[str, bool]:
+    """代码生成 Agent。
+
+    输入比普通 demo 更完整：
+    - 题目识别 Agent 输出的题面
+    - 解题规划 Agent 输出的思路
+    - RAG 检索到的算法模板
+    - 测试生成 Agent 输出的测试计划
+
+    也就是说，代码生成不是“只把题目丢给模型”，而是带着前面 Agent 的
+    中间结果生成代码。这里强制模型返回 Markdown，并把代码放进
+    ```python 代码块，方便后续 extract_code() 提取。
+    """
+
     system_prompt = """
 你是一个严谨的多 Agent 编程助手，负责把编程题转成可运行 Python 解法。
 
@@ -413,6 +543,13 @@ RAG 算法模板：
 
 
 def offline_test_plan(problem: str, reason: str = "") -> Tuple[str, List[Dict[str, str]]]:
+    """测试生成 Agent 的离线兜底版本。
+
+    根据题目关键词生成基础、边界、异常三类测试思路。虽然这里不是
+    真正执行每个结构化用例，但 test_plan 会作为代码生成的约束，
+    促使模型把 _run_tests() 写得更完整。
+    """
+
     lower = (problem or "").lower()
     if "two sum" in lower or "两数之和" in problem or "target" in lower:
         cases = [
@@ -462,6 +599,16 @@ def generate_tests_with_bailian(
     problem: str,
     plan: str,
 ) -> Tuple[str, List[Dict[str, str]], bool]:
+    """测试生成 Agent。
+
+    注意它在代码生成之前运行。原因是测试计划要作为代码生成 Agent 的
+    输入，让模型提前知道需要覆盖哪些样例和边界情况。
+
+    当前函数返回两部分：
+    - content：模型生成的 Markdown 测试计划。
+    - cases：结构化测试用例兜底数据，用于报告和后续后端接口扩展。
+    """
+
     system_prompt = """
 你是测试用例生成 Agent。请根据题目和解题规划生成测试策略。
 
@@ -498,6 +645,13 @@ def repair_code_with_bailian(
     execution_report: str,
     test_plan: str,
 ) -> Tuple[str, bool]:
+    """执行调试 Agent 的模型修复步骤。
+
+    当本地运行失败时，把题目、失败代码、执行日志和测试计划一起交给
+    模型，让模型只返回修复后的 Python 代码块。run_execution_debug_agent()
+    会控制最多修复 3 轮，并记录每轮修复结果。
+    """
+
     system_prompt = """
 你是执行调试 Agent。你会收到题目、失败代码、执行日志和测试计划。
 
@@ -527,6 +681,13 @@ def repair_code_with_bailian(
 
 
 def extract_code(markdown: str) -> str:
+    """从模型返回的 Markdown 中提取 Python 代码块。
+
+    代码生成 Agent 被要求把代码放进 ```python 块中，但模型偶尔会使用
+    ```py 或普通 ```。这里兼容几种常见写法，提取失败时返回空字符串，
+    再由 ensure_code() 切换到离线兜底代码。
+    """
+
     patterns = [
         r"```python\s*(.*?)```",
         r"```py\s*(.*?)```",
@@ -542,6 +703,19 @@ def extract_code(markdown: str) -> str:
 
 
 def offline_solution(problem: str, reason: str = "") -> str:
+    """代码生成 Agent 的离线兜底版本。
+
+    兜底代码覆盖几个常见演示题型：
+    - 两数之和
+    - 回文判断
+    - 斐波那契
+    - 文本情感分析
+    - 通用可运行模板
+
+    目标不是替代真实模型能力，而是保证“题目 -> 代码 -> 执行 -> 报告”
+    这条链路始终可演示，不会因为 API Key、额度或网络问题没有输出。
+    """
+
     normalized = problem.lower()
 
     if "two sum" in normalized or "两数之和" in problem:
@@ -712,6 +886,13 @@ if __name__ == "__main__":
 
 
 def ensure_code(markdown: str, problem: str) -> Tuple[str, bool]:
+    """保证后续执行阶段一定有 Python 代码可用。
+
+    返回值第二项表示是否启用了代码兜底：
+    - False：模型返回了可提取代码。
+    - True：模型没有给出代码块，系统改用 offline_solution()。
+    """
+
     code = extract_code(markdown)
     if code:
         return code, False
@@ -720,6 +901,13 @@ def ensure_code(markdown: str, problem: str) -> Tuple[str, bool]:
 
 
 def looks_dangerous(code: str) -> List[str]:
+    """做一层简单的危险调用关键词检查。
+
+    这是本地执行前的最低限度保护，避免生成代码直接调用系统命令、
+    网络请求、删除目录或动态执行字符串。它不能替代真正的 Docker/E2B
+    沙盒，但足够支撑第一阶段答辩里“有安全拦截”的说明。
+    """
+
     risky_patterns = [
         "os.system",
         "subprocess.",
@@ -736,6 +924,19 @@ def looks_dangerous(code: str) -> List[str]:
 
 
 def run_python_code(code: str, timeout_seconds: int) -> str:
+    """在本地临时目录执行生成代码，并返回文本执行报告。
+
+    执行流程：
+    1. 先用 looks_dangerous() 做危险关键词检查。
+    2. 把代码写入临时目录中的 solution.py。
+    3. 用当前 Python 解释器运行，限制超时时间。
+    4. 返回退出码、标准输出和错误输出。
+
+    注意：这个函数返回的是给 Streamlit 单文件版展示的文本报告。
+    如果接 Vue + FastAPI，后端需要把它转换成前端需要的
+    {exit_code, stdout, stderr, status, raw} 对象。
+    """
+
     risky = looks_dangerous(code)
     if risky:
         return (
@@ -780,6 +981,8 @@ def run_python_code(code: str, timeout_seconds: int) -> str:
 
 
 def execution_succeeded(execution_report: str) -> bool:
+    """根据执行报告判断代码是否运行成功。"""
+
     report = execution_report or ""
     normalized = report.replace(" ", "").lower()
     return (
@@ -796,6 +999,21 @@ def run_execution_debug_agent(
     code: str,
     test_plan: str,
 ) -> Tuple[str, str, List[Dict[str, Any]], bool, bool]:
+    """执行调试 Agent。
+
+    这是完整闭环里的最后一个 Agent。它先本地运行生成代码：
+    - 如果退出码为 0，说明代码通过自测，直接返回。
+    - 如果运行失败，会调用 repair_code_with_bailian() 修复。
+    - 最多修复 3 轮，每轮都会再次执行并记录结果。
+
+    返回：
+    - final_code：最终代码，可能是原代码，也可能是修复后的代码。
+    - execution_report：最终执行报告。
+    - repair_attempts：每轮修复记录。
+    - api_used：调试阶段是否调用过模型。
+    - fallback_used：调试阶段是否触发兜底。
+    """
+
     api_used = False
     fallback_used = False
     repair_attempts: List[Dict[str, Any]] = []
@@ -873,6 +1091,20 @@ def build_project_document(
     test_plan: str = "",
     repair_attempts: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
+    """生成可下载的 Markdown 项目报告。
+
+    这份报告不是简单拼接最终代码，而是把答辩需要讲的工程过程写进去：
+    - 技术方案
+    - 真实 Agent 顺序
+    - RAG 检索模板
+    - 每个 Agent 的输入/输出摘要
+    - 测试计划
+    - 执行报告
+    - 自动调试修复记录
+
+    所以页面中的“下载项目说明与测试报告”可以直接作为演示材料。
+    """
+
     api_state = "已调用阿里云百炼 API" if api_used else "未调用 API"
     fallback_state = "启用兜底输出" if fallback_used else "未启用兜底"
     code_preview = code if len(code) < 5000 else code[:5000] + "\n# ... 代码过长，已截断展示"
@@ -916,8 +1148,8 @@ def build_project_document(
 
 1. 题目识别 Agent：接收文本或图片，输出结构化题目。
 2. 解题规划 Agent：结合 RAG 模板，输出题型判断、步骤和复杂度目标。
-3. 代码生成 Agent：根据题目、规划和模板生成 Python 解法。
-4. 测试生成 Agent：生成基础、边界和异常测试策略。
+3. 测试生成 Agent：生成基础、边界和异常测试策略，并作为代码生成约束。
+4. 代码生成 Agent：根据题目、规划、RAG 模板和测试计划生成 Python 解法。
 5. 执行调试 Agent：执行代码，失败时最多尝试 3 轮自动修复。
 
 ## 4. 本次运行状态
@@ -1003,6 +1235,25 @@ def solve_problem(
     image_bytes: Optional[bytes] = None,
     image_mime: str = "image/png",
 ) -> AgentResult:
+    """主工作流编排函数。
+
+    这是整个单文件项目最重要的函数。新同学读项目时可以先看这里，
+    因为 5 个 Agent 的真实执行顺序都集中在这里：
+
+    1. 题目识别 Agent：处理文本或图片题目。
+    2. 解题规划 Agent：制定题型、算法、边界和复杂度计划。
+    3. 测试生成 Agent：先生成测试计划，后续约束代码生成。
+    4. 代码生成 Agent：生成 Markdown 解题说明和 Python 代码。
+    5. 执行调试 Agent：本地运行，失败时最多自动修复 3 轮。
+
+    轻量 RAG 检索不是单独 Agent，而是插在题目识别和解题规划之间：
+    它根据题面召回算法模板，再把模板提供给解题规划和代码生成阶段。
+    最后，报告生成会汇总题目、模板、步骤、测试、代码、日志和指标。
+
+    即使某一步 API 失败，也会捕获异常并走离线兜底，保证最终仍有
+    AgentResult 返回。
+    """
+
     started = now_ms()
     api_used = False
     fallback_used = False
@@ -1016,7 +1267,9 @@ def solve_problem(
     input_type = "text"
     problem = (text_problem or "").strip()
 
-    # Agent 1: problem recognition.
+    # Agent 1：题目识别。
+    # 文本输入直接使用；图片输入先调用视觉模型提取题意。
+    # 如果图片识别失败，会保留用户补充文本或使用默认题目兜底。
     step_started = now_ms()
     recognition_input = f"input_type={input_type}; has_image={bool(image_bytes)}; text={shorten_text(problem, 600)}"
     if image_bytes:
@@ -1053,10 +1306,12 @@ def solve_problem(
         )
     )
 
-    # RAG before generation: lightweight algorithm template retrieval.
+    # 轻量 RAG：在生成任何代码前先检索算法模板。
+    # 检索结果会进入解题规划 Agent 和代码生成 Agent，减少模型“凭空写”。
     retrieved_templates = retrieve_algorithm_templates(problem)
 
-    # Agent 2: solution planning.
+    # Agent 2：解题规划。
+    # 这一阶段只负责想清楚算法路线，不直接生成代码。
     step_started = now_ms()
     try:
         plan_markdown, used = plan_solution_with_bailian(config, problem, retrieved_templates)
@@ -1082,7 +1337,8 @@ def solve_problem(
         )
     )
 
-    # Agent 4 runs before code generation to provide tests as generation constraints.
+    # Agent 3：测试生成。
+    # 这里故意放在代码生成之前，让测试计划成为代码生成的输入约束。
     step_started = now_ms()
     try:
         test_plan, test_cases, used = generate_tests_with_bailian(config, problem, plan_markdown)
@@ -1109,7 +1365,8 @@ def solve_problem(
         )
     )
 
-    # Agent 3: code generation.
+    # Agent 4：代码生成。
+    # 输入包含题面、规划、RAG 模板和测试计划，输出 Markdown 与 Python 代码块。
     step_started = now_ms()
     try:
         solution_markdown, used = generate_solution_with_bailian(
@@ -1150,7 +1407,8 @@ def solve_problem(
         )
     )
 
-    # Agent 5: execution and debug repair.
+    # Agent 5：执行调试。
+    # 本地运行生成代码；失败时把日志交给调试 Agent，最多修复 3 轮。
     step_started = now_ms()
     final_code, execution_report, repair_attempts, used, repair_fallback = run_execution_debug_agent(
         config=config,
@@ -1223,6 +1481,19 @@ def solve_problem(
 
 
 def streamlit_app() -> None:
+    """Streamlit 页面入口。
+
+    这个函数只负责页面交互：
+    - 读取侧边栏配置。
+    - 接收文本题目或上传截图。
+    - 调用 solve_problem() 执行完整 Agent 工作流。
+    - 把结果拆成题意识别、Agent 步骤、RAG 模板、测试计划、代码、
+      执行结果、项目文档和下载按钮展示出来。
+
+    真正的业务逻辑不要写在这里，而是放在 solve_problem() 及其子函数中。
+    这样后续改成 Vue + FastAPI 时，后端也能直接复用同一套核心逻辑。
+    """
+
     import streamlit as st
 
     st.set_page_config(
@@ -1235,6 +1506,8 @@ def streamlit_app() -> None:
     st.caption("支持题目截图 / 文本输入，自动生成 Python 解法、运行结果和项目文档。")
 
     with st.sidebar:
+        # 侧边栏是演示时最常用的配置入口。没有 API Key 时也能跑，
+        # 因为 solve_problem() 会在各阶段触发离线兜底。
         st.header("百炼 API 配置")
         api_key = st.text_input(
             "阿里云百炼 API Key",
@@ -1256,6 +1529,7 @@ def streamlit_app() -> None:
         )
 
     config = AgentConfig(
+        # 把页面输入统一封装成 AgentConfig，后面所有 Agent 都只读 config。
         api_key=api_key,
         base_url=base_url,
         text_model=text_model,
@@ -1293,6 +1567,8 @@ def streamlit_app() -> None:
     if not run_button:
         return
 
+    # Streamlit 上传文件对象只能在页面层读取；核心函数只接收 bytes，
+    # 这样未来后端接口也可以把 UploadFile 转成 bytes 后复用 solve_problem()。
     image_bytes = uploaded_file.getvalue() if uploaded_file is not None else None
     image_mime = uploaded_file.type if uploaded_file is not None else "image/png"
 
@@ -1304,11 +1580,14 @@ def streamlit_app() -> None:
             image_mime=image_mime,
         )
 
+    # 如果某些 Agent 失败但已经兜底成功，仍然展示结果，并把异常细节折叠起来。
     if result.error:
         st.warning("运行过程中出现异常，系统已自动兜底并继续输出。")
         with st.expander("查看异常详情"):
             st.code(result.error, language="text")
 
+    # 顶部指标用于答辩时快速说明：耗时、是否调用 API、是否兜底、
+    # Agent 步骤数量、RAG 模板数量、自动修复轮次。
     status_cols = st.columns(6)
     status_cols[0].metric("总耗时", f"{result.metrics.get('total_ms', 0)} ms")
     status_cols[1].metric("API 调用", "是" if result.api_used else "否")
@@ -1335,6 +1614,8 @@ def streamlit_app() -> None:
         st.markdown(result.problem)
 
     with tab_agents:
+        # Agent 步骤展示是项目亮点：用户能看到每个阶段的输入、输出和耗时，
+        # 而不是只看到最终代码。
         for index, step in enumerate(result.agent_steps, start=1):
             title = f"{index}. {step.name} - {step.status} - {step.duration_ms} ms"
             with st.expander(title, expanded=index <= 2):
@@ -1377,6 +1658,7 @@ def streamlit_app() -> None:
         st.markdown(result.project_document)
 
     with tab_download:
+        # 下载内容全部来自 AgentResult，便于答辩时提交代码、报告和完整 JSON。
         st.download_button(
             "下载 Python 解法文件",
             data=(result.code or "# 未提取到代码\n").encode("utf-8"),
@@ -1401,6 +1683,15 @@ def streamlit_app() -> None:
 
 
 def cli_main() -> None:
+    """命令行测试入口。
+
+    用法：
+        python ai_coding_agent_bailian.py --cli "两数之和..."
+
+    这个入口方便不启动 Streamlit 时快速验证核心链路。它和页面一样调用
+    solve_problem()，所以能覆盖同一套 Agent/RAG/执行调试逻辑。
+    """
+
     text = " ".join(arg for arg in sys.argv[1:] if arg != "--cli").strip()
     if not text:
         text = "两数之和：给定 nums 和 target，返回两个数的下标，使它们的和等于 target。"
@@ -1429,6 +1720,12 @@ def cli_main() -> None:
 
 
 def running_under_streamlit() -> bool:
+    """判断当前脚本是否由 Streamlit 启动。
+
+    直接 `python ai_coding_agent_bailian.py` 时走 CLI；
+    `streamlit run ai_coding_agent_bailian.py` 时走页面。
+    """
+
     try:
         from streamlit.runtime.scriptrunner import get_script_run_ctx
 
