@@ -1,0 +1,196 @@
+<!-- src/views/HistoryView.vue -->
+<template>
+  <div class="history-container">
+    <h1>📚 历史任务</h1>
+    
+    <div class="filter-bar">
+      <el-select v-model="filterStatus" placeholder="筛选状态" clearable>
+        <el-option label="全部" value="" />
+        <el-option label="已完成" value="completed" />
+        <el-option label="执行中" value="running" />
+        <el-option label="失败" value="failed" />
+      </el-select>
+      <el-input 
+        v-model="searchKeyword" 
+        placeholder="搜索题目关键词" 
+        style="width: 200px"
+        clearable
+      />
+      <el-button type="primary" @click="fetchHistory">刷新</el-button>
+    </div>
+
+    <el-table :data="filteredTaskList" style="width: 100%" v-loading="loading">
+      <el-table-column prop="task_id" label="任务ID" width="150" />
+      <el-table-column prop="status" label="状态" width="100">
+        <template #default="{ row }">
+          <el-tag :type="getStatusType(row.status)">
+            {{ row.status }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="problem" label="题目" min-width="200">
+        <template #default="{ row }">
+          {{ row.problem ? row.problem.substring(0, 50) + '...' : '—' }}
+        </template>
+      </el-table-column>
+      <el-table-column prop="created_at" label="创建时间" width="180" />
+      <el-table-column prop="total_ms" label="耗时(ms)" width="100" />
+      <el-table-column label="操作" width="220">
+        <template #default="{ row }">
+          <el-button size="small" @click="viewDetail(row.task_id)">查看详情</el-button>
+          <el-button size="small" type="success" @click="downloadReport(row.task_id)">
+            下载报告
+          </el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <!-- 详情弹窗 -->
+    <el-dialog 
+      v-model="dialogVisible" 
+      title="任务详情" 
+      width="85%"
+      :close-on-click-modal="false"
+    >
+      <div v-if="detailData" class="detail-content">
+        <h4>📋 题意识别</h4>
+        <p>{{ detailData.problem || '—' }}</p>
+        
+        <h4>💡 解题思路</h4>
+        <p>{{ detailData.solution_markdown || '—' }}</p>
+        
+        <h4>💻 代码</h4>
+        <pre>{{ detailData.code || '—' }}</pre>
+        
+        <h4>⚙️ 执行结果</h4>
+        <pre>{{ detailData.execution_report ? JSON.stringify(detailData.execution_report, null, 2) : '—' }}</pre>
+
+        <h4>🤖 Agent 步骤</h4>
+        <AgentSteps :steps="detailSteps" />
+      </div>
+      <template #footer>
+        <el-button @click="dialogVisible = false">关闭</el-button>
+        <el-button type="primary" @click="downloadReport(currentTaskId)">
+          下载报告
+        </el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import { getTaskList, getTaskDetail, getTaskReport, getTaskSteps } from '../api/task'
+import AgentSteps from '../components/AgentSteps.vue'
+
+const loading = ref(false)
+const taskList = ref([])
+const filterStatus = ref('')
+const searchKeyword = ref('')
+const dialogVisible = ref(false)
+const detailData = ref(null)
+const detailSteps = ref([])
+const currentTaskId = ref('')
+
+const filteredTaskList = computed(() => {
+  let list = taskList.value
+  if (filterStatus.value) {
+    list = list.filter(item => item.status === filterStatus.value)
+  }
+  if (searchKeyword.value) {
+    const keyword = searchKeyword.value.toLowerCase()
+    list = list.filter(item => 
+      item.problem && item.problem.toLowerCase().includes(keyword)
+    )
+  }
+  return list
+})
+
+const getStatusType = (status) => {
+  const map = {
+    'completed': 'success',
+    'running': 'warning',
+    'failed': 'danger',
+    'pending': 'info'
+  }
+  return map[status] || 'info'
+}
+
+const fetchHistory = async () => {
+  loading.value = true
+  try {
+    const response = await getTaskList()
+    if (response.data.code === 0) {
+      taskList.value = response.data.data || []
+    }
+  } catch (error) {
+    ElMessage.error('加载历史失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+const viewDetail = async (taskId) => {
+  currentTaskId.value = taskId
+  try {
+    const [detailRes, stepsRes] = await Promise.all([
+      getTaskDetail(taskId),
+      getTaskSteps(taskId)
+    ])
+    
+    if (detailRes.data.code === 0) {
+      detailData.value = detailRes.data.data
+    }
+    if (stepsRes.data.code === 0) {
+      detailSteps.value = stepsRes.data.data || []
+    }
+    dialogVisible.value = true
+  } catch (error) {
+    ElMessage.error('加载详情失败')
+  }
+}
+
+const downloadReport = async (taskId) => {
+  if (!taskId) {
+    ElMessage.warning('没有可下载的报告')
+    return
+  }
+  try {
+    const response = await getTaskReport(taskId)
+    const blob = new Blob([response.data], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `report_${taskId}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success('报告下载成功')
+  } catch {
+    ElMessage.error('下载失败')
+  }
+}
+
+onMounted(fetchHistory)
+</script>
+
+<style scoped>
+.history-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+.filter-bar { 
+  display: flex; 
+  gap: 12px; 
+  margin-bottom: 20px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.detail-content { padding: 10px 0; }
+.detail-content h4 { margin: 16px 0 8px 0; color: #303133; }
+.detail-content pre {
+  background: #f5f7fa;
+  padding: 12px;
+  border-radius: 4px;
+  overflow: auto;
+  max-height: 300px;
+  font-size: 13px;
+}
+</style>
