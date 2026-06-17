@@ -1,0 +1,542 @@
+多模态代码生成 Agent 项目 - 后端接口对接说明
+适用对象：后端同学
+当前日期：2026-06-17
+
+一、当前项目现状
+
+1. 前端已经完成，目录：
+   frontend/
+
+2. 成员 C 已完成核心 Python 流程，文件：
+   ai_coding_agent_bailian.py
+
+3. 当前 Python 核心函数：
+   solve_problem(config, text_problem, image_bytes=None, image_mime="image/png") -> AgentResult
+
+4. 当前缺少后端 API 层。
+   前端已经写死请求地址：
+   http://127.0.0.1:8000
+
+5. 后端目标：
+   用 FastAPI 或 Flask 把 ai_coding_agent_bailian.py 里的 solve_problem 包装成前端需要的 API。
+
+
+二、前端请求文件位置
+
+frontend/src/api/task.js
+
+前端当前请求的接口：
+
+GET  /api/health
+POST /api/tasks/text
+POST /api/tasks/image
+GET  /api/tasks
+GET  /api/tasks/{task_id}
+GET  /api/tasks/{task_id}/report
+GET  /api/tasks/{task_id}/steps
+GET  /api/tasks/{task_id}/tests
+GET  /api/metrics/summary
+POST /api/tasks/{task_id}/rerun
+
+
+三、统一 JSON 返回格式
+
+除 report 下载接口外，其他接口建议统一返回：
+
+{
+  "code": 0,
+  "message": "success",
+  "data": {}
+}
+
+失败时：
+
+{
+  "code": 1,
+  "message": "错误原因",
+  "data": null
+}
+
+
+四、必须开启 CORS
+
+前端开发地址：
+http://127.0.0.1:5173
+http://localhost:5173
+
+FastAPI 示例：
+
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+五、接口详细说明
+
+接口 1：健康检查
+
+GET /api/health
+
+请求参数：无
+
+返回：
+
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "status": "ok"
+  }
+}
+
+
+接口 2：提交文本题目
+
+POST /api/tasks/text
+
+前端请求体：
+
+{
+  "problem_text": "两数之和：给定 nums 和 target，返回两个数的下标。"
+}
+
+后端处理：
+
+1. 生成 task_id。
+2. 调用成员 C 的 solve_problem：
+   result = solve_problem(config=config, text_problem=problem_text)
+3. 保存任务结果到内存字典或 SQLite。
+4. 返回 task_id。
+
+最小可用返回：
+
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "task_id": "20260617_0001",
+    "status": "completed"
+  }
+}
+
+说明：
+前端拿到 task_id 后，会继续调用 GET /api/tasks/{task_id} 轮询任务详情。
+
+
+接口 3：提交图片题目
+
+POST /api/tasks/image
+
+前端使用 multipart/form-data。
+
+字段：
+
+image: 图片文件
+supplement: 补充说明，可为空
+
+后端处理：
+
+1. 读取图片 bytes。
+2. 获取 image.content_type，例如 image/png。
+3. 调用成员 C 的 solve_problem：
+   result = solve_problem(
+       config=config,
+       text_problem=supplement,
+       image_bytes=image_bytes,
+       image_mime=image.content_type,
+   )
+4. 保存任务结果。
+5. 返回 task_id。
+
+返回格式同 POST /api/tasks/text。
+
+
+接口 4：获取任务详情
+
+GET /api/tasks/{task_id}
+
+这是前端最关键的接口。
+前端 pollTaskStatus 会不断请求这个接口，直到 data.status 为 completed 或 failed。
+
+返回字段必须包含：
+
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "task_id": "20260617_0001",
+    "status": "completed",
+    "problem": "结构化题目文本",
+    "solution_markdown": "解题说明 Markdown",
+    "code": "最终 Python 代码",
+    "execution_report": {
+      "exit_code": 0,
+      "stdout": "全部自测通过：two_sum",
+      "stderr": "",
+      "raw": "退出码：0\n\n标准输出：\n全部自测通过：two_sum"
+    },
+    "project_document": "完整项目报告 Markdown",
+    "total_ms": 12345,
+    "api_call": true,
+    "fallback_used": false,
+    "code_length": 1024,
+    "notes": "可选提示信息"
+  }
+}
+
+注意：
+成员 C 当前 Python 的 result.execution_report 是字符串。
+前端 HomeView.vue 期望 execution_report 是对象：
+
+result.execution_report.exit_code
+result.execution_report.stdout
+result.execution_report.stderr
+
+所以后端必须把 Python 的字符串执行报告转换成对象。
+
+建议转换规则：
+
+Python 原始字符串：
+
+退出码：0
+
+标准输出：
+全部自测通过：two_sum
+
+转换成：
+
+{
+  "exit_code": 0,
+  "stdout": "全部自测通过：two_sum",
+  "stderr": "",
+  "raw": "原始执行报告字符串"
+}
+
+
+接口 5：获取任务列表
+
+GET /api/tasks
+
+前端历史页使用。
+
+返回：
+
+{
+  "code": 0,
+  "message": "success",
+  "data": [
+    {
+      "task_id": "20260617_0001",
+      "status": "completed",
+      "problem": "两数之和：给定 nums 和 target...",
+      "created_at": "2026-06-17 10:30:00",
+      "total_ms": 12345
+    }
+  ]
+}
+
+字段说明：
+
+task_id: 任务 ID
+status: pending / running / completed / failed
+problem: 题目摘要，前端会截取前 50 个字符
+created_at: 创建时间
+total_ms: 总耗时
+
+
+接口 6：获取 Agent 步骤
+
+GET /api/tasks/{task_id}/steps
+
+前端组件：
+frontend/src/components/AgentSteps.vue
+
+前端期望字段：
+
+step.agent_name 或 step.step_name
+step.status
+step.duration_ms
+step.input
+step.output
+step.error
+
+成员 C 当前 Python 的 AgentStep 字段：
+
+name
+role
+status
+input_summary
+output_summary
+duration_ms
+error
+
+后端需要转换：
+
+Python 字段 -> 前端字段
+
+name -> agent_name
+name -> step_name
+input_summary -> input
+output_summary -> output
+status -> status
+duration_ms -> duration_ms
+error -> error
+role -> role，可选保留
+
+返回示例：
+
+{
+  "code": 0,
+  "message": "success",
+  "data": [
+    {
+      "agent_name": "题目识别 Agent",
+      "step_name": "题目识别 Agent",
+      "role": "接收文本/图片输入，输出结构化题面。",
+      "status": "completed",
+      "duration_ms": 1200,
+      "input": "input_type=text; has_image=false; text=两数之和...",
+      "output": "结构化题目文本",
+      "error": ""
+    },
+    {
+      "agent_name": "解题规划 Agent",
+      "step_name": "解题规划 Agent",
+      "role": "结合 RAG 模板输出题型判断、解题步骤、边界条件和复杂度目标。",
+      "status": "completed",
+      "duration_ms": 2300,
+      "input": "题目 + RAG 模板",
+      "output": "规划 Markdown",
+      "error": ""
+    }
+  ]
+}
+
+必须至少返回 5 个 Agent：
+
+1. 题目识别 Agent
+2. 解题规划 Agent
+3. 测试生成 Agent
+4. 代码生成 Agent
+5. 执行调试 Agent
+
+
+接口 7：获取测试用例
+
+GET /api/tasks/{task_id}/tests
+
+当前前端暂时没有强依赖展示这个接口，但 task.js 已定义。
+建议后端保留。
+
+返回：
+
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "test_plan": "测试计划 Markdown",
+    "repair_attempts": [
+      {
+        "round": 1,
+        "status": "passed",
+        "reason": "调试 Agent 已根据执行日志生成修复代码。",
+        "execution_report": "修复后的执行结果"
+      }
+    ]
+  }
+}
+
+
+接口 8：下载报告
+
+GET /api/tasks/{task_id}/report
+
+注意：
+前端 downloadReport 直接把 response.data 当文件内容下载。
+所以这个接口不要返回统一 JSON，直接返回 Markdown 文本。
+
+响应类型：
+text/markdown; charset=utf-8
+
+返回内容：
+
+# 多模态代码生成 Agent 项目说明与测试报告
+...
+
+
+接口 9：指标看板
+
+GET /api/metrics/summary
+
+前端 MetricsView.vue 需要字段：
+
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "total_tasks": 10,
+    "success_tasks": 8,
+    "failed_tasks": 2,
+    "success_rate": 80,
+    "avg_response_time": 12500,
+    "code_run_rate": 80,
+    "test_pass_rate": 70,
+    "repair_rate": 50
+  }
+}
+
+字段说明：
+
+total_tasks: 总任务数
+success_tasks: completed 数量
+failed_tasks: failed 数量
+success_rate: 成功率，百分比数字
+avg_response_time: 平均耗时，单位 ms
+code_run_rate: 代码可运行率，百分比数字
+test_pass_rate: 测试通过率，百分比数字
+repair_rate: 修复成功率，百分比数字
+
+如果暂时没有真实统计，可以先根据保存的任务结果粗略计算。
+
+
+接口 10：重新执行任务
+
+POST /api/tasks/{task_id}/rerun
+
+前端点击“重新执行”按钮使用。
+
+后端处理：
+
+1. 根据 task_id 找到原始题目输入。
+2. 重新调用 solve_problem。
+3. 覆盖或新增任务结果。
+4. 返回 task_id 和 status。
+
+返回：
+
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "task_id": "20260617_0001",
+    "status": "completed"
+  }
+}
+
+
+六、成员 C 的 Python 结果如何转换给前端
+
+成员 C 的 AgentResult 字段：
+
+problem: str
+solution_markdown: str
+code: str
+execution_report: str
+project_document: str
+metrics: dict
+agent_steps: list[AgentStep]
+retrieved_templates: list[dict]
+test_plan: str
+repair_attempts: list[dict]
+api_used: bool
+fallback_used: bool
+error: str
+
+后端返回给前端时建议转换为：
+
+{
+  "task_id": task_id,
+  "status": "completed" 或 "failed",
+  "problem": result.problem,
+  "solution_markdown": result.solution_markdown,
+  "code": result.code,
+  "execution_report": parse_execution_report(result.execution_report),
+  "project_document": result.project_document,
+  "total_ms": result.metrics.get("total_ms", 0),
+  "api_call": result.api_used,
+  "fallback_used": result.fallback_used,
+  "code_length": len(result.code or ""),
+  "notes": result.error,
+  "metrics": result.metrics,
+  "retrieved_templates": result.retrieved_templates,
+  "test_plan": result.test_plan,
+  "repair_attempts": result.repair_attempts
+}
+
+
+七、后端最小实现建议
+
+第一版不要一开始就做复杂异步队列。
+可以先用“同步执行 + 内存字典”跑通前端。
+
+建议内存结构：
+
+TASKS = {
+  "task_id": {
+    "task_id": "...",
+    "status": "completed",
+    "created_at": "...",
+    "input_type": "text",
+    "raw_input": "...",
+    "result": result_dict,
+    "steps": steps_list,
+    "report": project_document
+  }
+}
+
+最小实现顺序：
+
+1. GET /api/health
+2. POST /api/tasks/text
+3. GET /api/tasks/{task_id}
+4. GET /api/tasks/{task_id}/steps
+5. GET /api/tasks/{task_id}/report
+6. GET /api/tasks
+7. GET /api/metrics/summary
+8. POST /api/tasks/image
+9. POST /api/tasks/{task_id}/rerun
+10. GET /api/tasks/{task_id}/tests
+
+
+八、当前已知前后端不一致点
+
+1. 前端请求 FastAPI 地址 127.0.0.1:8000，但项目目前只有 Streamlit，没有后端。
+2. 前端创建任务后只使用 task_id 并轮询详情；Python 当前 solve_problem 是同步函数，没有任务系统。
+3. 前端期望 execution_report 是对象；Python 当前 execution_report 是字符串。
+4. 前端 AgentSteps 组件期望 agent_name/input/output；Python 当前是 name/input_summary/output_summary。
+5. 前端历史页需要任务列表；Python 当前没有数据库或历史记录。
+6. 前端指标页需要 /api/metrics/summary；Python 当前只有单次任务 metrics。
+7. 前端报告下载接口期望返回 Markdown 原文；不要包成 JSON。
+8. 前端图片接口字段是 image 和 supplement；后端要映射到 solve_problem 的 image_bytes、image_mime、text_problem。
+9. 前端 axios timeout 是 60000ms。真实大模型调用可能超过 60 秒，第一版可以先同步跑，后续建议改成后台任务。
+
+
+九、运行方式建议
+
+后端：
+
+cd backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install fastapi uvicorn python-multipart
+uvicorn main:app --reload --port 8000
+
+前端：
+
+cd frontend
+npm install
+npm run dev
+
+浏览器：
+
+http://127.0.0.1:5173
+
