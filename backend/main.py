@@ -1,18 +1,30 @@
-import uuid
+import sys
 import os
+
+# --- 
+# 获取当前文件的父目录路径 (即 backend 目录)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# 获取项目根目录 (即 backend 的上一级目录)
+root_dir = os.path.dirname(current_dir)
+# 将根目录强制加入 Python 的搜索列表，确保能够 import 到根目录下的 ai_coding_agent_bailian
+if root_dir not in sys.path:
+    sys.path.append(root_dir)
+
+import uuid
 import sqlite3
 import json
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-from pydantic import BaseModel  # 新增：用于定义请求模型
-# 确保文件已移动至 backend 文件夹下，否则请调整此引用路径
+from pydantic import BaseModel
+
+# 
 from ai_coding_agent_bailian import solve_problem, AgentConfig
 
 load_dotenv()
 app = FastAPI()
 
-# 新增：定义请求的数据结构
+# 定义请求模型
 class TaskRequest(BaseModel):
     problem_text: str
 
@@ -25,9 +37,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- 数据库初始化 ---
+# 确保数据库路径统一
+DB_PATH = os.path.join(current_dir, 'tasks.db')
+
 def init_db():
-    conn = sqlite3.connect('tasks.db')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS tasks 
                  (task_id TEXT PRIMARY KEY, status TEXT, data TEXT)''')
@@ -38,7 +52,6 @@ init_db()
 
 # --- 工具函数 ---
 def parse_execution_report(report_str):
-    """将字符串转换为前端要求的 JSON 对象格式"""
     return {
         "exit_code": 0,
         "stdout": report_str,
@@ -52,12 +65,11 @@ async def health_check():
     return {"code": 0, "message": "success", "data": {"status": "ok"}}
 
 @app.post("/api/tasks/text")
-async def process_text(task: TaskRequest):  # 修改：直接使用 TaskRequest 模型
+async def process_text(task: TaskRequest):
     problem_text = task.problem_text
     task_id = str(uuid.uuid4())
     
-    # 状态初始化
-    conn = sqlite3.connect('tasks.db')
+    conn = sqlite3.connect(DB_PATH)
     conn.execute("INSERT INTO tasks VALUES (?, ?, ?)", (task_id, "running", json.dumps({"status": "running"})))
     conn.commit()
     conn.close()
@@ -79,13 +91,13 @@ async def process_text(task: TaskRequest):  # 修改：直接使用 TaskRequest 
             "execution_report": parse_execution_report(str(result.execution_report))
         }
         
-        conn = sqlite3.connect('tasks.db')
+        conn = sqlite3.connect(DB_PATH)
         conn.execute("INSERT OR REPLACE INTO tasks VALUES (?, ?, ?)", (task_id, "completed", json.dumps(task_data)))
         conn.commit()
         conn.close()
         
     except Exception as e:
-        conn = sqlite3.connect('tasks.db')
+        conn = sqlite3.connect(DB_PATH)
         conn.execute("INSERT OR REPLACE INTO tasks VALUES (?, ?, ?)", (task_id, "failed", json.dumps({"message": str(e)})))
         conn.commit()
         conn.close()
@@ -95,7 +107,7 @@ async def process_text(task: TaskRequest):  # 修改：直接使用 TaskRequest 
 
 @app.get("/api/tasks/{task_id}")
 async def get_task(task_id: str):
-    conn = sqlite3.connect('tasks.db')
+    conn = sqlite3.connect(DB_PATH)
     row = conn.execute("SELECT data FROM tasks WHERE task_id=?", (task_id,)).fetchone()
     conn.close()
     if not row:
@@ -104,16 +116,15 @@ async def get_task(task_id: str):
 
 @app.get("/api/tasks")
 async def get_tasks():
-    conn = sqlite3.connect('tasks.db')
+    conn = sqlite3.connect(DB_PATH)
     rows = conn.execute("SELECT data FROM tasks").fetchall()
     conn.close()
-    # 过滤掉非 task_id 结构的数据
     data = [json.loads(row[0]) for row in rows if "task_id" in json.loads(row[0])]
     return {"code": 0, "message": "success", "data": data}
 
 @app.get("/api/tasks/{task_id}/report")
 async def download_report(task_id: str):
-    conn = sqlite3.connect('tasks.db')
+    conn = sqlite3.connect(DB_PATH)
     row = conn.execute("SELECT data FROM tasks WHERE task_id=?", (task_id,)).fetchone()
     conn.close()
     if not row:
