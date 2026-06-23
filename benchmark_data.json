@@ -1,0 +1,19 @@
+[
+  {
+    "task_id": "T001",
+    "problem_desc": "请编写一个名为 solution 的函数，接收两个整数 a 和 b，返回它们的和。",
+    "test_cases": [
+      {"input": "1, 2", "expected": "3"},
+      {"input": "-1, 5", "expected": "4"},
+      {"input": "0, 0", "expected": "0"}
+    ]
+  },
+  {
+    "task_id": "T002",
+    "problem_desc": "请编写一个名为 solution 的函数，接收一个列表，返回其中的最大值。",
+    "test_cases": [
+      {"input": "[1, 2, 3]", "expected": "3"},
+      {"input": "[-5, -1, -10]", "expected": "-1"}
+    ]
+  }
+]
