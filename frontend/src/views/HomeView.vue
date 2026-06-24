@@ -206,7 +206,8 @@ import {
   getTaskReport,
   getTaskSteps,
   rerunTask,
-  pollTaskStatus 
+  pollTaskStatus,
+  handleApiError
 } from '../api/task'
 import AgentSteps from '../components/AgentSteps.vue'
 
@@ -342,7 +343,7 @@ const submitTask = async () => {
     console.error('提交失败:', error)
     stopProgress()
     progressStatus.value = 'exception'
-    ElMessage.error(error.message || '请求失败，请检查后端是否启动')
+    ElMessage.error(handleApiError(error, '请求失败，请检查后端是否启动'))
   } finally {
     loading.value = false
     setTimeout(() => {
@@ -421,7 +422,8 @@ const handleRerun = async () => {
       }
     }
   } catch (error) {
-    ElMessage.error('重新执行失败')
+    console.error('重新执行失败:', error)
+    ElMessage.error(handleApiError(error, '重新执行失败'))
   } finally {
     rerunLoading.value = false
   }

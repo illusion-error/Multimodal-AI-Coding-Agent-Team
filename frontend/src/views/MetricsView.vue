@@ -55,7 +55,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getMetricsSummary } from '../api/task'
+import { getMetricsSummary, handleApiError } from '../api/task'
 
 const loading = ref(false)
 const metrics = ref({})
@@ -93,7 +93,8 @@ const fetchMetrics = async () => {
       metrics.value = response.data.data || {}
     }
   } catch (error) {
-    ElMessage.error('加载指标失败')
+    console.error('加载指标失败:', error)
+    ElMessage.error(handleApiError(error, '加载指标失败'))
   } finally {
     loading.value = false
   }

@@ -81,7 +81,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getTaskList, getTaskDetail, getTaskReport, getTaskSteps } from '../api/task'
+import { getTaskList, getTaskDetail, getTaskReport, getTaskSteps, handleApiError } from '../api/task'
 import AgentSteps from '../components/AgentSteps.vue'
 
 const loading = ref(false)
@@ -125,7 +125,8 @@ const fetchHistory = async () => {
       taskList.value = response.data.data || []
     }
   } catch (error) {
-    ElMessage.error('加载历史失败')
+    console.error('加载历史失败:', error)
+    ElMessage.error(handleApiError(error, '加载历史失败'))
   } finally {
     loading.value = false
   }
@@ -147,7 +148,8 @@ const viewDetail = async (taskId) => {
     }
     dialogVisible.value = true
   } catch (error) {
-    ElMessage.error('加载详情失败')
+    console.error('加载详情失败:', error)
+    ElMessage.error(handleApiError(error, '加载详情失败'))
   }
 }
 
@@ -165,9 +167,10 @@ const downloadReport = async (taskId) => {
     a.download = `report_${taskId}.md`
     a.click()
     URL.revokeObjectURL(url)
-    ElMessage.success('报告下载成功')
-  } catch {
-    ElMessage.error('下载失败')
+    ElMessage.success('下载成功')
+  } catch (error) {
+    console.error('下载失败:', error)
+    ElMessage.error(handleApiError(error, '下载失败'))
   }
 }
 

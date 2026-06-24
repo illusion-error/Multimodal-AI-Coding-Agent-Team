@@ -63,3 +63,27 @@ export const pollTaskStatus = async (taskId, interval = 2000, maxAttempts = 60) 
     }, interval)
   })
 }
+
+// ===== 统一错误处理 =====
+export const handleApiError = (error, defaultMessage = '请求失败') => {
+  if (error.response) {
+    const status = error.response.status
+    if (status === 404) {
+      return '接口暂未实现，请等待后端开发'
+    } else if (status === 500) {
+      return '服务器内部错误，请稍后重试'
+    } else if (status === 429) {
+      return '请求过于频繁，请稍后重试'
+    } else if (status === 401 || status === 403) {
+      return '权限不足，请检查配置'
+    } else if (status === 400) {
+      return error.response.data?.message || '请求参数错误'
+    }
+    return error.response.data?.message || defaultMessage
+  } else if (error.code === 'ECONNABORTED') {
+    return '请求超时，请检查网络或稍后重试'
+  } else if (error.message?.includes('Network Error')) {
+    return '网络连接失败，请检查后端是否启动'
+  }
+  return defaultMessage
+}
