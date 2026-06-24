@@ -4,3 +4,8 @@ agno>=2.2.10
 Pillow
 openai
 google-genai
+fastapi
+uvicorn
+python-dotenv
+requests
+pillow
