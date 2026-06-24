@@ -87,3 +87,18 @@ export const handleApiError = (error, defaultMessage = '请求失败') => {
   }
   return defaultMessage
 }
+
+// ===== 带友好提示的图片上传（封装） =====
+export const uploadImageWithFallback = async (imageFile, supplementText = '') => {
+  try {
+    const response = await createImageTask(imageFile, supplementText)
+    return response
+  } catch (error) {
+    if (error.response && error.response.status === 404) {
+      const customError = new Error('图片上传功能暂未实现，请使用文本输入')
+      customError.isImageUpload404 = true
+      throw customError
+    }
+    throw error
+  }
+}

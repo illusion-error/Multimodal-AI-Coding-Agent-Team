@@ -180,7 +180,10 @@
       <!-- Agent 步骤（折叠） -->
       <el-collapse class="agent-collapse">
         <el-collapse-item title="🤖 查看 Agent 执行链路" name="agent">
-          <AgentSteps :steps="agentSteps" />
+          <div v-if="agentSteps.length === 0" class="empty-steps">
+            <el-empty description="暂无 Agent 步骤数据，请等待后端开发" :image-size="60" />
+          </div>
+          <AgentSteps v-else :steps="agentSteps" />
         </el-collapse-item>
       </el-collapse>
 
@@ -201,17 +204,16 @@ import { ref, computed, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
 import { 
-  createTextTask, 
-  createImageTask, 
+  createTextTask,
   getTaskReport,
   getTaskSteps,
   rerunTask,
   pollTaskStatus,
-  handleApiError
+  handleApiError,
+  uploadImageWithFallback
 } from '../api/task'
 import AgentSteps from '../components/AgentSteps.vue'
 
-// 配置 marked
 marked.setOptions({
   breaks: true,
   gfm: true
@@ -232,7 +234,6 @@ const progressHint = ref('')
 const activeTab = ref('problem')
 let progressTimer = null
 
-// 渲染 Markdown
 const renderedProblem = computed(() => {
   if (!result.value) return ''
   return marked(result.value.problem || '—')
@@ -248,7 +249,6 @@ const renderedDocument = computed(() => {
   return marked(JSON.stringify(result.value, null, 2))
 })
 
-// 代码行号
 const codeLines = computed(() => {
   if (!result.value || !result.value.code) return []
   const lines = result.value.code.split('\n')
@@ -293,6 +293,25 @@ const stopProgress = () => {
   progressHint.value = '✅ 完成！'
 }
 
+const fetchAgentSteps = async (id) => {
+  try {
+    const response = await getTaskSteps(id)
+    if (response.data.code === 0) {
+      agentSteps.value = response.data.data || []
+    } else if (response.data.code === 404) {
+      // 接口未实现，静默处理
+      agentSteps.value = []
+    }
+  } catch (error) {
+    // 如果是 404，不显示错误，只显示空状态
+    if (error.response && error.response.status === 404) {
+      agentSteps.value = []
+    } else {
+      console.error('获取 Agent 步骤失败:', error)
+    }
+  }
+}
+
 const submitTask = async () => {
   if (!problemText.value.trim() && !uploadFile.value) {
     ElMessage.warning('请输入题目描述或上传截图')
@@ -307,8 +326,20 @@ const submitTask = async () => {
 
   try {
     let response
+    
     if (uploadFile.value) {
-      response = await createImageTask(uploadFile.value, supplementText.value)
+      try {
+        response = await uploadImageWithFallback(uploadFile.value, supplementText.value)
+      } catch (imgError) {
+        if (imgError.isImageUpload404) {
+          stopProgress()
+          progressStatus.value = 'exception'
+          ElMessage.warning('图片上传功能暂未实现，请使用文本输入')
+          loading.value = false
+          return
+        }
+        throw imgError
+      }
     } else {
       response = await createTextTask(problemText.value)
     }
@@ -322,15 +353,12 @@ const submitTask = async () => {
       finalResult.code_length = finalResult.code ? finalResult.code.length : 0
       finalResult.api_call = true
       finalResult.fallback_used = finalResult.fallback_used || false
-      // 添加注意信息（如果后端返回了）
       finalResult.notes = finalResult.notes || '请确保输入符合题目要求，代码在 Python 3.10+ 环境中运行。'
       
       result.value = finalResult
       
-      const stepsResponse = await getTaskSteps(taskId.value)
-      if (stepsResponse.data.code === 0) {
-        agentSteps.value = stepsResponse.data.data || []
-      }
+      // 静默获取 Agent 步骤
+      await fetchAgentSteps(taskId.value)
       
       stopProgress()
       ElMessage.success('生成成功！')
@@ -343,7 +371,9 @@ const submitTask = async () => {
     console.error('提交失败:', error)
     stopProgress()
     progressStatus.value = 'exception'
-    ElMessage.error(handleApiError(error, '请求失败，请检查后端是否启动'))
+    if (!error.isImageUpload404) {
+      ElMessage.error(handleApiError(error, '请求失败，请检查后端是否启动'))
+    }
   } finally {
     loading.value = false
     setTimeout(() => {
@@ -374,8 +404,9 @@ const downloadReport = async (format = 'md') => {
     a.click()
     URL.revokeObjectURL(url)
     ElMessage.success('下载成功')
-  } catch {
-    ElMessage.error('下载失败')
+  } catch (error) {
+    console.error('下载失败:', error)
+    ElMessage.error(handleApiError(error, '下载失败'))
   }
 }
 
@@ -416,10 +447,7 @@ const handleRerun = async () => {
       const finalResult = await pollTaskStatus(taskId.value)
       finalResult.code_length = finalResult.code ? finalResult.code.length : 0
       result.value = finalResult
-      const stepsResponse = await getTaskSteps(taskId.value)
-      if (stepsResponse.data.code === 0) {
-        agentSteps.value = stepsResponse.data.data || []
-      }
+      await fetchAgentSteps(taskId.value)
     }
   } catch (error) {
     console.error('重新执行失败:', error)
@@ -447,7 +475,6 @@ onUnmounted(() => {
 
 .result-card { margin-top: 20px; }
 
-/* 部署卡片 */
 .deployment-cards { margin-bottom: 20px; }
 .deploy-card {
   background: #f5f7fa;
@@ -472,12 +499,10 @@ onUnmounted(() => {
   color: #909399;
 }
 
-/* Tab 样式 */
 .result-tabs { margin-top: 10px; }
 .tab-content { padding: 10px 0; }
 .tab-content h4 { margin: 0 0 10px 0; color: #303133; }
 
-/* Markdown 渲染 */
 .markdown-body {
   line-height: 1.8;
   color: #303133;
@@ -508,7 +533,6 @@ onUnmounted(() => {
   color: #303133;
 }
 
-/* 代码容器（带行号） */
 .code-container {
   display: flex;
   background: #1e1e2e;
@@ -576,6 +600,7 @@ onUnmounted(() => {
   margin-top: 10px;
 }
 .agent-collapse { margin-top: 20px; }
+.empty-steps { padding: 10px 0; }
 .action-buttons {
   display: flex;
   gap: 12px;
@@ -583,8 +608,6 @@ onUnmounted(() => {
   flex-wrap: wrap;
   justify-content: center;
 }
-
-/* 注意区域 */
 .notes-area {
   margin-top: 16px;
 }

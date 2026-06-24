@@ -3,7 +3,6 @@
   <div class="metrics-container">
     <h1>📊 指标看板</h1>
 
-    <!-- 概览卡片 -->
     <el-row :gutter="20" class="metrics-cards">
       <el-col :span="6" v-for="item in overviewMetrics" :key="item.label">
         <el-card shadow="hover">
@@ -15,7 +14,6 @@
       </el-col>
     </el-row>
 
-    <!-- 详细指标 -->
     <el-row :gutter="20">
       <el-col :span="12">
         <el-card>

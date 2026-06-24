@@ -66,7 +66,10 @@
         <pre>{{ detailData.execution_report ? JSON.stringify(detailData.execution_report, null, 2) : '—' }}</pre>
 
         <h4>🤖 Agent 步骤</h4>
-        <AgentSteps :steps="detailSteps" />
+        <div v-if="detailSteps.length === 0" class="empty-steps">
+          <el-empty description="暂无 Agent 步骤数据" :image-size="60" />
+        </div>
+        <AgentSteps v-else :steps="detailSteps" />
       </div>
       <template #footer>
         <el-button @click="dialogVisible = false">关闭</el-button>
@@ -143,13 +146,22 @@ const viewDetail = async (taskId) => {
     if (detailRes.data.code === 0) {
       detailData.value = detailRes.data.data
     }
-    if (stepsRes.data.code === 0) {
+    // 步骤接口 404 时静默处理
+    if (stepsRes.data && stepsRes.data.code === 0) {
       detailSteps.value = stepsRes.data.data || []
+    } else {
+      detailSteps.value = []
     }
     dialogVisible.value = true
   } catch (error) {
-    console.error('加载详情失败:', error)
-    ElMessage.error(handleApiError(error, '加载详情失败'))
+    // 如果是 404，只显示详情，不报错
+    if (error.response && error.response.status === 404) {
+      detailSteps.value = []
+      dialogVisible.value = true
+    } else {
+      console.error('加载详情失败:', error)
+      ElMessage.error(handleApiError(error, '加载详情失败'))
+    }
   }
 }
 
@@ -196,4 +208,5 @@ onMounted(fetchHistory)
   max-height: 300px;
   font-size: 13px;
 }
+.empty-steps { padding: 10px 0; }
 </style>

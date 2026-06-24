@@ -1,8 +1,6 @@
 <!-- src/components/AgentSteps.vue -->
 <template>
   <div class="agent-steps">
-    <h3>🤖 Agent 执行链路</h3>
-    
     <el-timeline>
       <el-timeline-item
         v-for="(step, index) in steps"
@@ -41,7 +39,7 @@
 </template>
 
 <script setup>
-const props = defineProps({
+defineProps({
   steps: {
     type: Array,
     default: () => []
@@ -78,7 +76,7 @@ const formatContent = (content) => {
 </script>
 
 <style scoped>
-.agent-steps { margin: 20px 0; }
+.agent-steps { margin: 10px 0; }
 .step-item { width: 100%; }
 .step-header { 
   display: flex; 
