@@ -3,6 +3,7 @@
   <div class="metrics-container">
     <h1>📊 指标看板</h1>
 
+    <!-- 概览卡片 -->
     <el-row :gutter="20" class="metrics-cards">
       <el-col :span="6" v-for="item in overviewMetrics" :key="item.label">
         <el-card shadow="hover">
@@ -14,7 +15,13 @@
       </el-col>
     </el-row>
 
-    <el-row :gutter="20">
+    <!-- Benchmark 图表 -->
+    <el-card class="benchmark-card">
+      <BenchmarkCharts :data="benchmarkData" :loading="benchmarkLoading" @refresh="fetchBenchmarkData" />
+    </el-card>
+
+    <!-- 详细指标 -->
+    <el-row :gutter="20" style="margin-top: 20px;">
       <el-col :span="12">
         <el-card>
           <h3>📈 任务统计</h3>
@@ -41,7 +48,7 @@
 
     <el-button 
       type="primary" 
-      @click="refreshMetrics" 
+      @click="refreshAll" 
       :loading="loading"
       style="margin-top: 20px"
     >
@@ -53,10 +60,13 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getMetricsSummary, handleApiError } from '../api/task'
+import { getMetricsSummary, getBenchmarkData, handleApiError } from '../api/task'
+import BenchmarkCharts from '../components/BenchmarkCharts.vue'
 
 const loading = ref(false)
+const benchmarkLoading = ref(false)
 const metrics = ref({})
+const benchmarkData = ref({})
 
 const overviewMetrics = computed(() => [
   { label: '总任务数', value: metrics.value.total_tasks || 0 },
@@ -71,17 +81,9 @@ const successRate = computed(() => {
   return total ? ((success / total) * 100).toFixed(1) : 0
 })
 
-const codeRunRate = computed(() => {
-  return metrics.value.code_run_rate || 0
-})
-
-const testPassRate = computed(() => {
-  return metrics.value.test_pass_rate || 0
-})
-
-const repairRate = computed(() => {
-  return metrics.value.repair_rate || 0
-})
+const codeRunRate = computed(() => metrics.value.code_run_rate || 0)
+const testPassRate = computed(() => metrics.value.test_pass_rate || 0)
+const repairRate = computed(() => metrics.value.repair_rate || 0)
 
 const fetchMetrics = async () => {
   loading.value = true
@@ -98,12 +100,37 @@ const fetchMetrics = async () => {
   }
 }
 
-const refreshMetrics = () => {
+const fetchBenchmarkData = async () => {
+  benchmarkLoading.value = true
+  try {
+    const response = await getBenchmarkData()
+    if (response.data.code === 0) {
+      benchmarkData.value = response.data.data || {}
+    } else {
+      benchmarkData.value = {}
+    }
+  } catch (error) {
+    if (error.response && error.response.status === 404) {
+      benchmarkData.value = {}
+    } else {
+      console.error('加载 Benchmark 数据失败:', error)
+      ElMessage.error(handleApiError(error, '加载 Benchmark 数据失败'))
+    }
+  } finally {
+    benchmarkLoading.value = false
+  }
+}
+
+const refreshAll = () => {
   fetchMetrics()
+  fetchBenchmarkData()
   ElMessage.success('已刷新')
 }
 
-onMounted(fetchMetrics)
+onMounted(() => {
+  fetchMetrics()
+  fetchBenchmarkData()
+})
 </script>
 
 <style scoped>
@@ -122,4 +149,5 @@ onMounted(fetchMetrics)
 }
 .chart-placeholder { padding: 10px 0; }
 .chart-placeholder p { margin: 8px 0; font-size: 15px; }
+.benchmark-card { margin-top: 20px; }
 </style>

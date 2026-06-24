@@ -40,6 +40,20 @@ export const getMetricsSummary = () => api.get('/api/metrics/summary')
 // ===== 重新执行 =====
 export const rerunTask = (taskId) => api.post(`/api/tasks/${taskId}/rerun`)
 
+// ===== Trace 详情 =====
+export const getTaskTrace = (taskId) => api.get(`/api/tasks/${taskId}/trace`)
+
+// ===== Prompt 版本列表 =====
+export const getPromptVersions = () => api.get('/api/prompt/versions')
+
+// ===== 更新 Prompt 版本 =====
+export const updatePromptVersion = (agentName, version) => {
+  return api.post('/api/prompt/version', { agent_name: agentName, version })
+}
+
+// ===== Benchmark 数据 =====
+export const getBenchmarkData = () => api.get('/api/benchmark/results')
+
 // ===== 轮询任务状态 =====
 export const pollTaskStatus = async (taskId, interval = 2000, maxAttempts = 60) => {
   let attempts = 0
@@ -88,7 +102,7 @@ export const handleApiError = (error, defaultMessage = '请求失败') => {
   return defaultMessage
 }
 
-// ===== 带友好提示的图片上传（封装） =====
+// ===== 带友好提示的图片上传 =====
 export const uploadImageWithFallback = async (imageFile, supplementText = '') => {
   try {
     const response = await createImageTask(imageFile, supplementText)
