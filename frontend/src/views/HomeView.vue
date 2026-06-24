@@ -3,6 +3,26 @@
   <div class="home-container">
     <h1>🧠 多模态代码生成 Agent</h1>
 
+    <!-- 控制栏：Prompt 版本选择 + 模型路由 -->
+    <div class="control-bar">
+      <div class="control-group">
+        <span class="control-label">Prompt 版本：</span>
+        <el-select v-model="selectedPromptVersion" placeholder="选择版本" size="small" style="width: 140px">
+          <el-option
+            v-for="v in promptVersions"
+            :key="v.version"
+            :label="v.version + (v.is_active ? ' (当前)' : '')"
+            :value="v.version"
+          />
+        </el-select>
+        <el-button size="small" type="primary" @click="applyPromptVersion">应用</el-button>
+      </div>
+      <div class="control-group" v-if="currentModel">
+        <span class="control-label">当前模型：</span>
+        <el-tag type="info" size="small">{{ currentModel }}</el-tag>
+      </div>
+    </div>
+
     <!-- 输入区 -->
     <el-card class="input-card">
       <el-input
@@ -47,7 +67,7 @@
     </el-card>
 
     <!-- 任务进度 -->
-    <el-card v-if="taskId && loading" class="progress-card">
+    <el-card v-if="loading" class="progress-card">
       <h3>⏳ 任务执行中</h3>
       <el-progress :percentage="progress" :status="progressStatus" />
       <p class="progress-hint">{{ progressHint }}</p>
@@ -58,13 +78,13 @@
       <!-- 部署信息卡片 -->
       <div class="deployment-cards">
         <el-row :gutter="16">
-          <el-col :span="6">
+          <el-col :span="4">
             <div class="deploy-card">
               <div class="deploy-label">总耗时</div>
-              <div class="deploy-value">{{ result.total_ms || 0 }} <span class="deploy-unit">毫秒</span></div>
+              <div class="deploy-value">{{ result.total_ms || 0 }} <span class="deploy-unit">ms</span></div>
             </div>
           </el-col>
-          <el-col :span="6">
+          <el-col :span="4">
             <div class="deploy-card">
               <div class="deploy-label">API 调用</div>
               <div class="deploy-value">
@@ -74,7 +94,7 @@
               </div>
             </div>
           </el-col>
-          <el-col :span="6">
+          <el-col :span="4">
             <div class="deploy-card">
               <div class="deploy-label">兜底输出</div>
               <div class="deploy-value">
@@ -84,10 +104,26 @@
               </div>
             </div>
           </el-col>
-          <el-col :span="6">
+          <el-col :span="4">
             <div class="deploy-card">
               <div class="deploy-label">代码长度</div>
               <div class="deploy-value">{{ result.code_length || 0 }} <span class="deploy-unit">字符</span></div>
+            </div>
+          </el-col>
+          <el-col :span="4">
+            <div class="deploy-card">
+              <div class="deploy-label">使用模型</div>
+              <div class="deploy-value" style="font-size: 16px;">
+                <el-tag type="info" size="small">{{ result.model_name || '—' }}</el-tag>
+              </div>
+            </div>
+          </el-col>
+          <el-col :span="4">
+            <div class="deploy-card">
+              <div class="deploy-label">Prompt 版本</div>
+              <div class="deploy-value" style="font-size: 16px;">
+                <el-tag type="warning" size="small">{{ result.prompt_version || '—' }}</el-tag>
+              </div>
             </div>
           </el-col>
         </el-row>
@@ -139,6 +175,18 @@
           </div>
         </el-tab-pane>
 
+        <el-tab-pane label="Agent Timeline" name="timeline">
+          <div class="tab-content">
+            <AgentTimeline :steps="agentSteps" />
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="Trace 详情" name="trace">
+          <div class="tab-content">
+            <TraceDetail :trace-id="result.trace_id" :trace-data="traceData" />
+          </div>
+        </el-tab-pane>
+
         <el-tab-pane label="项目文档" name="document">
           <div class="tab-content">
             <h4>完整报告</h4>
@@ -177,16 +225,6 @@
         />
       </div>
 
-      <!-- Agent 步骤（折叠） -->
-      <el-collapse class="agent-collapse">
-        <el-collapse-item title="🤖 查看 Agent 执行链路" name="agent">
-          <div v-if="agentSteps.length === 0" class="empty-steps">
-            <el-empty description="暂无 Agent 步骤数据，请等待后端开发" :image-size="60" />
-          </div>
-          <AgentSteps v-else :steps="agentSteps" />
-        </el-collapse-item>
-      </el-collapse>
-
       <!-- 底部操作按钮 -->
       <div class="action-buttons">
         <el-button type="warning" @click="handleRerun" :loading="rerunLoading">
@@ -207,12 +245,16 @@ import {
   createTextTask,
   getTaskReport,
   getTaskSteps,
+  getTaskTrace,
   rerunTask,
   pollTaskStatus,
   handleApiError,
-  uploadImageWithFallback
+  uploadImageWithFallback,
+  getPromptVersions,
+  updatePromptVersion
 } from '../api/task'
-import AgentSteps from '../components/AgentSteps.vue'
+import AgentTimeline from '../components/AgentTimeline.vue'
+import TraceDetail from '../components/TraceDetail.vue'
 
 marked.setOptions({
   breaks: true,
@@ -232,6 +274,10 @@ const progress = ref(0)
 const progressStatus = ref('')
 const progressHint = ref('')
 const activeTab = ref('problem')
+const selectedPromptVersion = ref('')
+const promptVersions = ref([])
+const currentModel = ref('')
+const traceData = ref({})
 let progressTimer = null
 
 const renderedProblem = computed(() => {
@@ -254,6 +300,38 @@ const codeLines = computed(() => {
   const lines = result.value.code.split('\n')
   return lines.map((_, i) => i + 1)
 })
+
+// 加载 Prompt 版本列表
+const loadPromptVersions = async () => {
+  try {
+    const response = await getPromptVersions()
+    if (response.data.code === 0) {
+      promptVersions.value = response.data.data || []
+      const active = promptVersions.value.find(v => v.is_active)
+      if (active) {
+        selectedPromptVersion.value = active.version
+      }
+    }
+  } catch (error) {
+    if (error.response && error.response.status === 404) {
+      promptVersions.value = [{ version: 'v1.0', is_active: true }]
+      selectedPromptVersion.value = 'v1.0'
+    }
+  }
+}
+
+const applyPromptVersion = async () => {
+  if (!selectedPromptVersion.value) {
+    ElMessage.warning('请选择版本')
+    return
+  }
+  try {
+    await updatePromptVersion('all', selectedPromptVersion.value)
+    ElMessage.success(`已切换到 Prompt 版本 ${selectedPromptVersion.value}`)
+  } catch (error) {
+    ElMessage.error('切换版本失败')
+  }
+}
 
 const handleFileChange = (file) => {
   uploadFile.value = file.raw
@@ -298,16 +376,31 @@ const fetchAgentSteps = async (id) => {
     const response = await getTaskSteps(id)
     if (response.data.code === 0) {
       agentSteps.value = response.data.data || []
-    } else if (response.data.code === 404) {
-      // 接口未实现，静默处理
+    } else {
       agentSteps.value = []
     }
   } catch (error) {
-    // 如果是 404，不显示错误，只显示空状态
     if (error.response && error.response.status === 404) {
       agentSteps.value = []
     } else {
       console.error('获取 Agent 步骤失败:', error)
+    }
+  }
+}
+
+const fetchTraceData = async (id) => {
+  try {
+    const response = await getTaskTrace(id)
+    if (response.data.code === 0) {
+      traceData.value = response.data.data || {}
+    } else {
+      traceData.value = {}
+    }
+  } catch (error) {
+    if (error.response && error.response.status === 404) {
+      traceData.value = {}
+    } else {
+      console.error('获取 Trace 数据失败:', error)
     }
   }
 }
@@ -318,9 +411,11 @@ const submitTask = async () => {
     return
   }
 
+  // 立即显示进度
   loading.value = true
   result.value = null
   agentSteps.value = []
+  traceData.value = {}
   activeTab.value = 'problem'
   startProgress()
 
@@ -351,14 +446,20 @@ const submitTask = async () => {
       const finalResult = await pollTaskStatus(taskId.value)
       
       finalResult.code_length = finalResult.code ? finalResult.code.length : 0
-      finalResult.api_call = true
+      // 从后端读取 api_call，如果没有则默认为 true
+      finalResult.api_call = finalResult.api_call ?? true
       finalResult.fallback_used = finalResult.fallback_used || false
       finalResult.notes = finalResult.notes || '请确保输入符合题目要求，代码在 Python 3.10+ 环境中运行。'
+      finalResult.model_name = finalResult.model_name || 'qwen-max'
+      finalResult.prompt_version = finalResult.prompt_version || selectedPromptVersion.value || 'v1.0'
       
       result.value = finalResult
+      currentModel.value = finalResult.model_name
       
-      // 静默获取 Agent 步骤
-      await fetchAgentSteps(taskId.value)
+      await Promise.all([
+        fetchAgentSteps(taskId.value),
+        fetchTraceData(taskId.value)
+      ])
       
       stopProgress()
       ElMessage.success('生成成功！')
@@ -373,6 +474,26 @@ const submitTask = async () => {
     progressStatus.value = 'exception'
     if (!error.isImageUpload404) {
       ElMessage.error(handleApiError(error, '请求失败，请检查后端是否启动'))
+      // 设置兜底数据，让页面不空白
+      result.value = {
+        task_id: 'fallback_' + Date.now(),
+        status: 'failed',
+        problem: problemText.value || '（输入为空）',
+        solution_markdown: '❌ 生成失败，请检查后端服务是否正常运行。\n\n错误信息：' + (error.message || '未知错误'),
+        code: '# 生成失败，请检查后端服务',
+        execution_report: { 
+          stdout: '', 
+          stderr: error.message || '后端服务不可用', 
+          exit_code: 1 
+        },
+        total_ms: 0,
+        api_call: false,
+        fallback_used: true,
+        code_length: 0,
+        model_name: '—',
+        prompt_version: '—',
+        notes: '系统使用了兜底输出，请检查后端配置'
+      }
     }
   } finally {
     loading.value = false
@@ -447,7 +568,11 @@ const handleRerun = async () => {
       const finalResult = await pollTaskStatus(taskId.value)
       finalResult.code_length = finalResult.code ? finalResult.code.length : 0
       result.value = finalResult
-      await fetchAgentSteps(taskId.value)
+      currentModel.value = finalResult.model_name || 'qwen-max'
+      await Promise.all([
+        fetchAgentSteps(taskId.value),
+        fetchTraceData(taskId.value)
+      ])
     }
   } catch (error) {
     console.error('重新执行失败:', error)
@@ -456,6 +581,8 @@ const handleRerun = async () => {
     rerunLoading.value = false
   }
 }
+
+loadPromptVersions()
 
 onUnmounted(() => {
   if (progressTimer) {
@@ -466,6 +593,29 @@ onUnmounted(() => {
 
 <style scoped>
 .home-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+
+.control-bar {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 16px;
+  background: #f5f7fa;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.control-label {
+  font-size: 13px;
+  color: #606266;
+}
+
 .input-card { margin-bottom: 20px; }
 .upload-area { display: flex; align-items: center; gap: 10px; margin: 12px 0; flex-wrap: wrap; }
 .file-name { color: #409EFF; }
@@ -479,22 +629,22 @@ onUnmounted(() => {
 .deploy-card {
   background: #f5f7fa;
   border-radius: 8px;
-  padding: 16px 20px;
+  padding: 12px 16px;
   text-align: center;
   border: 1px solid #ebeef5;
 }
 .deploy-label {
-  font-size: 13px;
+  font-size: 12px;
   color: #909399;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 .deploy-value {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 600;
   color: #303133;
 }
 .deploy-unit {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 400;
   color: #909399;
 }
@@ -503,10 +653,7 @@ onUnmounted(() => {
 .tab-content { padding: 10px 0; }
 .tab-content h4 { margin: 0 0 10px 0; color: #303133; }
 
-.markdown-body {
-  line-height: 1.8;
-  color: #303133;
-}
+.markdown-body { line-height: 1.8; color: #303133; }
 .markdown-body :deep(h1) { font-size: 22px; margin: 16px 0 8px 0; }
 .markdown-body :deep(h2) { font-size: 18px; margin: 14px 0 6px 0; }
 .markdown-body :deep(h3) { font-size: 16px; margin: 12px 0 4px 0; }
@@ -528,10 +675,7 @@ onUnmounted(() => {
   font-family: 'Courier New', monospace;
   font-size: 13px;
 }
-.markdown-body :deep(strong) {
-  font-weight: 700;
-  color: #303133;
-}
+.markdown-body :deep(strong) { font-weight: 700; color: #303133; }
 
 .code-container {
   display: flex;
@@ -552,9 +696,7 @@ onUnmounted(() => {
   user-select: none;
   border-right: 1px solid #313244;
 }
-.code-lines span {
-  display: block;
-}
+.code-lines span { display: block; }
 .code-pre {
   flex: 1;
   background: #1e1e2e;
@@ -566,9 +708,7 @@ onUnmounted(() => {
   line-height: 1.6;
   overflow: auto;
 }
-.code-pre code {
-  font-family: 'Courier New', monospace;
-}
+.code-pre code { font-family: 'Courier New', monospace; }
 
 .output-pre {
   background: #1e1e2e;
@@ -581,10 +721,8 @@ onUnmounted(() => {
   font-size: 13px;
   line-height: 1.6;
 }
-.error-pre {
-  background: #1e1e2e;
-  color: #f38ba8;
-}
+.error-pre { background: #1e1e2e; color: #f38ba8; }
+
 .document-content pre {
   background: #f5f7fa;
   padding: 16px;
@@ -593,22 +731,7 @@ onUnmounted(() => {
   overflow: auto;
   font-size: 13px;
 }
-.download-buttons {
-  display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-top: 10px;
-}
-.agent-collapse { margin-top: 20px; }
-.empty-steps { padding: 10px 0; }
-.action-buttons {
-  display: flex;
-  gap: 12px;
-  margin-top: 20px;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-.notes-area {
-  margin-top: 16px;
-}
+.download-buttons { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; }
+.notes-area { margin-top: 16px; }
+.action-buttons { display: flex; gap: 12px; margin-top: 20px; flex-wrap: wrap; justify-content: center; }
 </style>

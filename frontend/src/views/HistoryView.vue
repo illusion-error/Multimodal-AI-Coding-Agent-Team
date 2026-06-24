@@ -138,30 +138,34 @@ const fetchHistory = async () => {
 const viewDetail = async (taskId) => {
   currentTaskId.value = taskId
   try {
-    const [detailRes, stepsRes] = await Promise.all([
-      getTaskDetail(taskId),
-      getTaskSteps(taskId)
-    ])
+    // 先获取任务详情
+    const detailRes = await getTaskDetail(taskId)
     
     if (detailRes.data.code === 0) {
       detailData.value = detailRes.data.data
-    }
-    // 步骤接口 404 时静默处理
-    if (stepsRes.data && stepsRes.data.code === 0) {
-      detailSteps.value = stepsRes.data.data || []
     } else {
-      detailSteps.value = []
+      ElMessage.error(detailRes.data.message || '加载详情失败')
+      return
     }
+    
+    // 单独获取 Agent 步骤（失败不影响详情显示）
+    try {
+      const stepsRes = await getTaskSteps(taskId)
+      if (stepsRes.data && stepsRes.data.code === 0) {
+        detailSteps.value = stepsRes.data.data || []
+      } else {
+        detailSteps.value = []
+      }
+    } catch (stepsError) {
+      // 步骤接口 404 或其他错误，静默处理
+      detailSteps.value = []
+      console.log('Agent步骤接口暂未实现或获取失败')
+    }
+    
     dialogVisible.value = true
   } catch (error) {
-    // 如果是 404，只显示详情，不报错
-    if (error.response && error.response.status === 404) {
-      detailSteps.value = []
-      dialogVisible.value = true
-    } else {
-      console.error('加载详情失败:', error)
-      ElMessage.error(handleApiError(error, '加载详情失败'))
-    }
+    console.error('加载详情失败:', error)
+    ElMessage.error(handleApiError(error, '加载详情失败'))
   }
 }
 
