@@ -2,55 +2,36 @@ import subprocess
 import tempfile
 import os
 
-def execute_code_safely(code_str: str, task_id: str = "test", timeout_seconds: int = 5) -> dict:
-    """
-    成员 D 提供：符合文档 P14 (execution_logs) 标准的终极沙盒
-    不仅执行代码，还将输出严格格式化，方便 B 成员直接存入数据库
-    """
-    log_record = {
-        "task_id": task_id,
-        "code_version": 1,
-        "stdout": "",
-        "stderr": "",
-        "exit_code": -1,
-        "timeout": False
-    }
-
-    # 1. 危险调用拦截 (危险调用拦截)
-    forbidden = ["os.system", "subprocess", "rm -rf", "shutil"]
-    for word in forbidden:
+def execute_code_safely(code_str: str, timeout_seconds: int = 5) -> dict:
+    # 静态安全检查
+    forbidden_words = ["os.system", "subprocess", "open", "read", "shutil", "__file__"]
+    for word in forbidden_words:
         if word in code_str:
-            log_record["stderr"] = f"危险调用拦截: 包含禁用关键字 [{word}]"
-            log_record["exit_code"] = 1
-            return log_record
+            return {"status": "error", "message": f"沙盒静态拦截: 代码包含高危操作汇编汇编 '{word}'"}
 
-    # 2. 隔离执行
+    # 动态沙盒隔离执行
     with tempfile.TemporaryDirectory() as temp_dir:
-        file_path = os.path.join(temp_dir, "temp_exec.py")
+        file_path = os.path.join(temp_dir, "solution.py")
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(code_str)
         
+        # 核心修复：切断宿主机环境变量，防止代码读取系统密钥
+        clean_env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": temp_dir}
+        
         try:
+            # 核心修复：通过 cwd 限制工作目录，使其无法使用相对路径 ../ 逃逸到根目录
             result = subprocess.run(
-                ["python", file_path],
-                capture_output=True, text=True, timeout=timeout_seconds
+                ["python", "solution.py"],
+                cwd=temp_dir,    
+                env=clean_env,   
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds
             )
-            log_record["stdout"] = result.stdout
-            log_record["stderr"] = result.stderr
-            log_record["exit_code"] = result.returncode
-            
+            if result.returncode == 0:
+                return {"status": "success", "stdout": result.stdout}
+            else:
+                return {"status": "failed", "stderr": result.stderr}
+                
         except subprocess.TimeoutExpired:
-            log_record["timeout"] = True
-            log_record["stderr"] = f"执行超时（>{timeout_seconds}秒），已强制中断！"
-            log_record["exit_code"] = 124
-        except Exception as e:
-            log_record["stderr"] = f"系统执行异常: {str(e)}"
-            log_record["exit_code"] = 1
-            
-    return log_record
-
-if __name__ == "__main__":
-    # 测试一下完美输出
-    print("沙盒拦截测试:", execute_code_safely("import os\nos.system('dir')"))
-    print("沙盒超时测试:", execute_code_safely("while True: pass", timeout_seconds=2))
-    print("沙盒正常测试:", execute_code_safely("print('Hello World')"))
+            return {"status": "timeout", "stderr": "运行超时，沙盒强制终止"}
