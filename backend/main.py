@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -28,6 +28,7 @@ from backend.database import (  # noqa: E402
     get_tests_by_task,
     init_db,
     list_all_tasks,
+    calc_metrics,
     replace_task_artifacts,
     update_task,
 )
@@ -36,6 +37,8 @@ from backend.database import (  # noqa: E402
 APP_VERSION = "1.0.0"
 AGENT_AVAILABLE = True
 AGENT_IMPORT_ERROR = ""
+ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
+MAX_IMAGE_BYTES = int(os.getenv("MAX_IMAGE_BYTES", str(10 * 1024 * 1024)))
 
 
 def _allowed_origins() -> list[str]:
@@ -225,6 +228,46 @@ async def process_text(task: TaskRequest, background_tasks: BackgroundTasks) -> 
     )
 
 
+@app.post("/api/tasks/image")
+async def process_image(
+    background_tasks: BackgroundTasks,
+    image: UploadFile = File(...),
+    supplement: str = Form(""),
+) -> dict:
+    if image.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="仅支持 PNG、JPEG、WebP 图片",
+        )
+    content = await image.read(MAX_IMAGE_BYTES + 1)
+    if not content:
+        raise HTTPException(status_code=400, detail="图片文件不能为空")
+    if len(content) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="图片大小不能超过 10MB")
+
+    problem_text = supplement.strip()
+    task_id = create_background_task(
+        background_tasks,
+        problem_text=problem_text,
+        input_type="image",
+        image_bytes=content,
+        image_mime=image.content_type,
+        extra_data={
+            "image_filename": image.filename or "problem-image",
+            "image_size": len(content),
+        },
+    )
+    return api_response(
+        {
+            "task_id": task_id,
+            "status": "running",
+            "filename": image.filename,
+            "size": len(content),
+        },
+        message="图片任务已创建",
+    )
+
+
 @app.get("/api/tasks")
 async def get_tasks() -> dict:
     return api_response(list_all_tasks())
@@ -271,6 +314,59 @@ async def get_task_repairs(task_id: str) -> dict:
     if not get_task_by_id(task_id):
         raise HTTPException(status_code=404, detail="任务不存在")
     return api_response(get_execution_logs_by_task(task_id))
+
+
+@app.get("/api/tasks/{task_id}/report")
+async def get_task_report(task_id: str) -> Response:
+    task = get_task_by_id(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    data = task["data"]
+    document = str(data.get("project_document", "")).strip()
+    if not document:
+        document = (
+            "# AI 代码生成报告\n\n"
+            f"## 题目\n\n{data.get('problem', '')}\n\n"
+            f"## 解题说明\n\n{data.get('solution_markdown', '')}\n\n"
+            "## Python 代码\n\n"
+            f"```python\n{data.get('code', '')}\n```\n"
+        )
+    headers = {
+        "Content-Disposition": f'attachment; filename="report_{task_id}.md"'
+    }
+    return Response(
+        content=document,
+        media_type="text/markdown; charset=utf-8",
+        headers=headers,
+    )
+
+
+@app.post("/api/tasks/{task_id}/rerun")
+async def rerun_task(
+    task_id: str,
+    background_tasks: BackgroundTasks,
+) -> dict:
+    task = get_task_by_id(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    problem_text = str(task["data"].get("problem", task["problem"])).strip()
+    if not problem_text:
+        raise HTTPException(status_code=400, detail="原任务缺少题目文本")
+    new_task_id = create_background_task(
+        background_tasks,
+        problem_text=problem_text,
+        input_type="text",
+        extra_data={"original_task_id": task_id},
+    )
+    return api_response(
+        {"task_id": new_task_id, "status": "running", "original_task_id": task_id},
+        message="重新执行任务已创建",
+    )
+
+
+@app.get("/api/metrics/summary")
+async def get_metrics_summary() -> dict:
+    return api_response(calc_metrics())
 
 
 @app.on_event("startup")
