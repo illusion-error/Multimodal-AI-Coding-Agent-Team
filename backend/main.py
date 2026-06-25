@@ -30,6 +30,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 from ai_coding_agent_bailian import (  # noqa: E402
     AgentConfig,
     agent_result_to_dict,
+    looks_like_corrupted_text,
     solve_problem,
 )
 from backend.database import (  # noqa: E402
@@ -285,6 +286,11 @@ async def process_text(
     problem_text = task.problem_text.strip()
     if not problem_text:
         raise HTTPException(status_code=400, detail="题目不能为空")
+    if looks_like_corrupted_text(problem_text):
+        raise HTTPException(
+            status_code=400,
+            detail="题目文本疑似乱码（大量字符变成 ?），请重新输入并使用 UTF-8",
+        )
     request_api_key = normalize_request_api_key(x_dashscope_api_key)
     task_id = create_background_task(
         background_tasks,
@@ -317,6 +323,11 @@ async def process_image(
 
     image_info = validate_image(content, image.content_type or "")
     problem_text = supplement.strip()
+    if looks_like_corrupted_text(problem_text):
+        raise HTTPException(
+            status_code=400,
+            detail="补充说明疑似乱码（大量字符变成 ?），请重新输入",
+        )
     request_api_key = normalize_request_api_key(x_dashscope_api_key)
     effective_key = request_api_key or os.getenv(
         "DASHSCOPE_API_KEY",

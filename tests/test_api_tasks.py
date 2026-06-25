@@ -38,6 +38,15 @@ def test_text_task_full_workflow(client):
     assert metrics["success_tasks"] == 2
 
 
+def test_text_api_rejects_corrupted_question_mark_input(client):
+    response = client.post(
+        "/api/tasks/text",
+        json={"problem_text": "???????? nums ???? target ????????????"},
+    )
+    assert response.status_code == 400
+    assert "乱码" in response.json()["detail"]
+
+
 def test_failed_execution_is_not_counted_as_completed(client, monkeypatch):
     import backend.main as backend_main
 

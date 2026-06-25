@@ -21,7 +21,13 @@ export const createTextTask = (problemText, apiKey = '') => {
   return api.post(
     '/api/tasks/text',
     { problem_text: problemText },
-    apiKeyConfig(apiKey),
+    {
+      ...apiKeyConfig(apiKey),
+      headers: {
+        ...apiKeyConfig(apiKey).headers,
+        'Content-Type': 'application/json; charset=UTF-8',
+      },
+    },
   )
 }
 

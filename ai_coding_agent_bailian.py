@@ -135,6 +135,136 @@ def shorten_text(text: Any, limit: int = 1200) -> str:
     return value[:limit] + "\n...（已截断）"
 
 
+def looks_like_corrupted_text(text: str) -> bool:
+    """Detect text where non-ASCII characters were replaced by question marks."""
+
+    value = str(text or "").strip()
+    question_marks = value.count("?") + value.count("？")
+    visible_chars = sum(not char.isspace() for char in value)
+    return question_marks >= 4 and question_marks / max(visible_chars, 1) >= 0.12
+
+
+def infer_problem_contract(problem: str) -> Dict[str, Any]:
+    """Infer a non-negotiable input/output contract from the recognized problem."""
+
+    text = str(problem or "")
+    lower = text.lower()
+    is_two_sum = (
+        "two sum" in lower
+        or "两数之和" in text
+        or ("nums" in lower and "target" in lower)
+    )
+    asks_for_indices = any(
+        keyword in lower
+        for keyword in ("index", "indices", "return indices")
+    ) or any(keyword in text for keyword in ("下标", "索引"))
+
+    if is_two_sum and asks_for_indices:
+        return {
+            "id": "two_sum_indices",
+            "title": "两数之和：返回下标",
+            "signature": "solution(nums: list[int], target: int) -> list[int]",
+            "input": "整数数组 nums 和整数 target",
+            "output": "返回两个不同元素的下标 [i, j]；无解返回 []",
+            "rules": [
+                "返回值必须是下标列表，不得返回 True/False。",
+                "不得返回元素值本身。",
+                "必须满足 i != j 且 nums[i] + nums[j] == target。",
+                "期望时间复杂度 O(n)。",
+            ],
+        }
+    if "palindrome" in lower or "回文" in text:
+        return {
+            "id": "palindrome",
+            "title": "回文判断",
+            "signature": "solution(text: str) -> bool",
+            "input": "字符串 text",
+            "output": "返回布尔值，表示忽略大小写和非字母数字字符后是否回文",
+            "rules": ["空字符串视为回文。"],
+        }
+    if "fibonacci" in lower or "斐波那契" in text:
+        return {
+            "id": "fibonacci",
+            "title": "斐波那契数",
+            "signature": "solution(n: int) -> int",
+            "input": "非负整数 n",
+            "output": "返回第 n 个斐波那契数",
+            "rules": ["F(0)=0，F(1)=1。"],
+        }
+    return {
+        "id": "generic",
+        "title": "通用编程题",
+        "signature": "solution(*args)",
+        "input": "以题目原文为准",
+        "output": "严格保持题目要求的返回类型和语义",
+        "rules": ["不得擅自把返回下标、返回值等要求改成布尔判断。"],
+    }
+
+
+def format_problem_contract(contract: Dict[str, Any]) -> str:
+    rules = "\n".join(f"- {rule}" for rule in contract.get("rules", []))
+    return (
+        f"契约编号：{contract.get('id', 'generic')}\n"
+        f"函数签名：{contract.get('signature', 'solution(*args)')}\n"
+        f"输入：{contract.get('input', '')}\n"
+        f"输出：{contract.get('output', '')}\n"
+        f"不可变规则：\n{rules or '- 严格遵守题目原文'}"
+    )
+
+
+def authoritative_test_cases(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return system-owned cases that model output cannot weaken or rewrite."""
+
+    if contract.get("id") == "two_sum_indices":
+        return [
+            {
+                "name": "基础样例",
+                "args": [[2, 7, 11, 15], 9],
+                "input": "nums=[2,7,11,15], target=9",
+                "expected": [0, 1],
+                "category": "basic",
+                "purpose": "验证返回两个下标而不是布尔值",
+            },
+            {
+                "name": "非相邻答案",
+                "args": [[3, 2, 4], 6],
+                "input": "nums=[3,2,4], target=6",
+                "expected": [1, 2],
+                "category": "normal",
+                "purpose": "验证哈希表查找",
+            },
+            {
+                "name": "重复元素",
+                "args": [[3, 3], 6],
+                "input": "nums=[3,3], target=6",
+                "expected": [0, 1],
+                "category": "edge",
+                "purpose": "验证不能重复使用同一元素",
+            },
+            {
+                "name": "无解情况",
+                "args": [[1, 2, 3], 7],
+                "input": "nums=[1,2,3], target=7",
+                "expected": [],
+                "category": "edge",
+                "purpose": "验证无解返回空列表",
+            },
+        ]
+    if contract.get("id") == "palindrome":
+        return [
+            {"name": "标准回文", "args": ["A man, a plan, a canal: Panama"], "input": "A man, a plan, a canal: Panama", "expected": True, "category": "basic"},
+            {"name": "非回文", "args": ["race a car"], "input": "race a car", "expected": False, "category": "normal"},
+            {"name": "空字符串", "args": [""], "input": "", "expected": True, "category": "edge"},
+        ]
+    if contract.get("id") == "fibonacci":
+        return [
+            {"name": "零项", "args": [0], "input": "n=0", "expected": 0, "category": "edge"},
+            {"name": "第一项", "args": [1], "input": "n=1", "expected": 1, "category": "edge"},
+            {"name": "常规输入", "args": [10], "input": "n=10", "expected": 55, "category": "basic"},
+        ]
+    return []
+
+
 def build_step(
     name: str,
     role: str,
@@ -445,6 +575,7 @@ def plan_solution_with_bailian(
     config: AgentConfig,
     problem: str,
     templates: List[Dict[str, Any]],
+    contract: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, bool]:
     """解题规划 Agent。
 
@@ -473,6 +604,9 @@ def plan_solution_with_bailian(
 
 RAG 检索到的算法模板：
 {format_templates_for_prompt(templates)}
+
+题目语义契约（不可修改）：
+{format_problem_contract(contract or infer_problem_contract(problem))}
 """
     messages = [
         {"role": "system", "content": system_prompt.strip()},
@@ -487,6 +621,8 @@ def generate_solution_with_bailian(
     plan: str = "",
     templates: Optional[List[Dict[str, Any]]] = None,
     test_plan: str = "",
+    contract: Optional[Dict[str, Any]] = None,
+    authoritative_cases: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[str, bool]:
     """代码生成 Agent。
 
@@ -536,6 +672,12 @@ RAG 算法模板：
 
 测试生成 Agent 输出：
 {test_plan.strip() or "暂无测试计划，请在代码中自行补充 _run_tests()。"}
+
+题目语义契约（优先级最高，不可修改）：
+{format_problem_contract(contract or infer_problem_contract(problem))}
+
+系统权威测试用例（代码必须满足）：
+{json.dumps(authoritative_cases or [], ensure_ascii=False, indent=2)}
 """
     messages = [
         {"role": "system", "content": system_prompt.strip()},
@@ -552,8 +694,12 @@ def offline_test_plan(problem: str, reason: str = "") -> Tuple[str, List[Dict[st
     促使模型把 _run_tests() 写得更完整。
     """
 
+    contract = infer_problem_contract(problem)
+    system_cases = authoritative_test_cases(contract)
     lower = (problem or "").lower()
-    if "two sum" in lower or "两数之和" in problem or "target" in lower:
+    if system_cases:
+        cases = system_cases
+    elif "two sum" in lower or "两数之和" in problem or "target" in lower:
         cases = [
             {"name": "基础样例", "args": [[2, 7, 11, 15], 9], "input": "nums=[2,7,11,15], target=9", "expected": [0, 1], "purpose": "验证常规命中"},
             {"name": "重复数字", "args": [[3, 3], 6], "input": "nums=[3,3], target=6", "expected": [0, 1], "purpose": "验证重复元素"},
@@ -602,7 +748,8 @@ def offline_test_plan(problem: str, reason: str = "") -> Tuple[str, List[Dict[st
 
     note = f"\n\n> 测试计划兜底原因：{reason}" if reason else ""
     rows = "\n".join(
-        f"- {case['name']}：输入 `{case['input']}`，期望 `{case['expected']}`，目的：{case['purpose']}"
+        f"- {case['name']}：输入 `{case.get('input', case.get('args', []))}`，"
+        f"期望 `{case['expected']}`，目的：{case.get('purpose', '验证题目语义')}"
         for case in cases
     )
     plan = f"""
@@ -622,6 +769,7 @@ def generate_tests_with_bailian(
     config: AgentConfig,
     problem: str,
     plan: str,
+    contract: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, List[Dict[str, Any]], bool]:
     """测试生成 Agent。
 
@@ -668,6 +816,9 @@ def generate_tests_with_bailian(
 
 解题规划：
 {plan.strip()}
+
+题目语义契约（不可修改输出类型或返回语义）：
+{format_problem_contract(contract or infer_problem_contract(problem))}
 """
     messages = [
         {"role": "system", "content": system_prompt.strip()},
@@ -693,7 +844,15 @@ def generate_tests_with_bailian(
         if valid_cases:
             cases = valid_cases
             break
-    if not cases:
+    system_cases = authoritative_test_cases(contract or infer_problem_contract(problem))
+    if system_cases:
+        cases = system_cases
+        content += (
+            "\n\n## 系统权威测试用例\n\n"
+            "模型生成的测试建议已保留作为说明；实际执行以下不可修改的语义测试：\n\n"
+            f"```json\n{json.dumps(system_cases, ensure_ascii=False, indent=2)}\n```"
+        )
+    elif not cases:
         _, cases = offline_test_plan(problem, "模型未返回可解析的结构化测试用例。")
     return content, cases, True
 
@@ -704,6 +863,8 @@ def repair_code_with_bailian(
     code: str,
     execution_report: str,
     test_plan: str,
+    contract: Optional[Dict[str, Any]] = None,
+    test_cases: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[str, bool]:
     """执行调试 Agent 的模型修复步骤。
 
@@ -732,6 +893,12 @@ def repair_code_with_bailian(
 
 测试计划：
 {test_plan}
+
+题目语义契约（不可修改）：
+{format_problem_contract(contract or infer_problem_contract(problem))}
+
+必须通过的权威测试：
+{json.dumps(test_cases or [], ensure_ascii=False, indent=2)}
 """
     messages = [
         {"role": "system", "content": system_prompt.strip()},
@@ -1187,6 +1354,7 @@ def agent_result_to_dict(result: AgentResult) -> Dict[str, Any]:
         "execution_report": execution_report,
         "project_document": result.project_document,
         "metrics": metrics,
+        "problem_contract": metrics.get("problem_contract", {}),
         "agent_steps": steps,
         "retrieved_templates": list(result.retrieved_templates),
         "rag_hits": list(result.retrieved_templates),
@@ -1208,6 +1376,7 @@ def run_execution_debug_agent(
     code: str,
     test_plan: str,
     test_cases: Optional[List[Dict[str, Any]]] = None,
+    contract: Optional[Dict[str, Any]] = None,
 ) -> Tuple[
     str,
     str,
@@ -1276,6 +1445,8 @@ def run_execution_debug_agent(
                 code=current_code,
                 execution_report=execution_report,
                 test_plan=test_plan,
+                contract=contract,
+                test_cases=test_cases,
             )
             api_used = api_used or used
             repaired_code = extract_code(repair_markdown) or repair_markdown.strip()
@@ -1522,6 +1693,11 @@ def solve_problem(
 
     input_type = "text"
     problem = (text_problem or "").strip()
+    if looks_like_corrupted_text(problem):
+        raise ValueError(
+            "题目文本疑似在传输前发生乱码（大量字符变成 ?）。"
+            "请在浏览器页面重新输入，或确保客户端使用 UTF-8。"
+        )
 
     # Agent 1：题目识别。
     # 文本输入直接使用；图片输入先调用视觉模型提取题意。
@@ -1532,6 +1708,8 @@ def solve_problem(
         input_type = "image" if not problem else "image+text"
         try:
             problem, used = extract_problem_from_image(config, image_bytes, image_mime, problem)
+            if looks_like_corrupted_text(problem):
+                raise ValueError("视觉识别结果疑似乱码，请重新上传清晰图片。")
             api_used = api_used or used
         except Exception as exc:
             errors.append(str(exc))
@@ -1551,12 +1729,15 @@ def solve_problem(
         problem = "给定一个整数数组 nums 和目标值 target，请返回两个数的下标，使它们的和等于 target。"
         fallback_used = True
 
+    contract = infer_problem_contract(problem)
+    contract_text = format_problem_contract(contract)
+
     agent_steps.append(
         build_step(
             name="题目识别 Agent",
             role="接收文本/图片输入，输出结构化题面。",
             input_summary=recognition_input,
-            output_summary=problem,
+            output_summary=f"{problem}\n\n题目语义契约：\n{contract_text}",
             started_ms=step_started,
             status="completed",
         )
@@ -1570,7 +1751,12 @@ def solve_problem(
     # 这一阶段只负责想清楚算法路线，不直接生成代码。
     step_started = now_ms()
     try:
-        plan_markdown, used = plan_solution_with_bailian(config, problem, retrieved_templates)
+        plan_markdown, used = plan_solution_with_bailian(
+            config,
+            problem,
+            retrieved_templates,
+            contract,
+        )
         api_used = api_used or used
         planning_error = ""
         planning_status = "completed"
@@ -1597,7 +1783,12 @@ def solve_problem(
     # 这里故意放在代码生成之前，让测试计划成为代码生成的输入约束。
     step_started = now_ms()
     try:
-        test_plan, test_cases, used = generate_tests_with_bailian(config, problem, plan_markdown)
+        test_plan, test_cases, used = generate_tests_with_bailian(
+            config,
+            problem,
+            plan_markdown,
+            contract,
+        )
         api_used = api_used or used
         test_error = ""
         test_status = "completed"
@@ -1645,6 +1836,8 @@ def solve_problem(
                 plan=plan_markdown,
                 templates=retrieved_templates,
                 test_plan=test_plan,
+                contract=contract,
+                authoritative_cases=authoritative_test_cases(contract),
             )
             api_used = api_used or used
             generation_error = ""
@@ -1693,6 +1886,7 @@ def solve_problem(
         code=code,
         test_plan=test_plan,
         test_cases=test_cases,
+        contract=contract,
     )
     api_used = api_used or used
     fallback_used = fallback_used or repair_fallback
@@ -1729,6 +1923,7 @@ def solve_problem(
         "test_case_count": len(test_cases),
         "repair_attempt_count": len(repair_attempts),
         "execution_success": execution_succeeded(execution_report),
+        "problem_contract": contract,
     }
     document = build_project_document(
         problem=problem,

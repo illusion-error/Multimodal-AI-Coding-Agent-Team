@@ -154,6 +154,30 @@
           <div class="tab-content">
             <h4>题意理解</h4>
             <div class="markdown-body" v-html="renderedProblem"></div>
+            <el-descriptions
+              v-if="result.problem_contract && result.problem_contract.id"
+              title="系统语义契约"
+              :column="1"
+              border
+              class="contract-panel"
+            >
+              <el-descriptions-item label="函数签名">
+                {{ result.problem_contract.signature }}
+              </el-descriptions-item>
+              <el-descriptions-item label="输入">
+                {{ result.problem_contract.input }}
+              </el-descriptions-item>
+              <el-descriptions-item label="输出">
+                {{ result.problem_contract.output }}
+              </el-descriptions-item>
+              <el-descriptions-item label="不可变规则">
+                <ul class="contract-rules">
+                  <li v-for="rule in result.problem_contract.rules || []" :key="rule">
+                    {{ rule }}
+                  </li>
+                </ul>
+              </el-descriptions-item>
+            </el-descriptions>
           </div>
         </el-tab-pane>
 
@@ -795,6 +819,9 @@ onUnmounted(() => {
   font-size: 13px;
 }
 .markdown-body :deep(strong) { font-weight: 700; color: #303133; }
+.contract-panel { margin-top: 18px; }
+.contract-rules { margin: 0; padding-left: 20px; }
+.contract-rules li { margin: 4px 0; }
 
 .code-container {
   display: flex;
