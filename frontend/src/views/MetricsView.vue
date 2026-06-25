@@ -16,7 +16,7 @@
     </el-row>
 
     <!-- Benchmark 图表 -->
-    <el-card class="benchmark-card">
+    <el-card v-if="stage2Enabled" class="benchmark-card">
       <BenchmarkCharts :data="benchmarkData" :loading="benchmarkLoading" @refresh="fetchBenchmarkData" />
     </el-card>
 
@@ -67,6 +67,7 @@ const loading = ref(false)
 const benchmarkLoading = ref(false)
 const metrics = ref({})
 const benchmarkData = ref({})
+const stage2Enabled = import.meta.env.VITE_ENABLE_STAGE2 === 'true'
 
 const overviewMetrics = computed(() => [
   { label: '总任务数', value: metrics.value.total_tasks || 0 },
@@ -101,6 +102,7 @@ const fetchMetrics = async () => {
 }
 
 const fetchBenchmarkData = async () => {
+  if (!stage2Enabled) return
   benchmarkLoading.value = true
   try {
     const response = await getBenchmarkData()
@@ -123,13 +125,13 @@ const fetchBenchmarkData = async () => {
 
 const refreshAll = () => {
   fetchMetrics()
-  fetchBenchmarkData()
+  if (stage2Enabled) fetchBenchmarkData()
   ElMessage.success('已刷新')
 }
 
 onMounted(() => {
   fetchMetrics()
-  fetchBenchmarkData()
+  if (stage2Enabled) fetchBenchmarkData()
 })
 </script>
 

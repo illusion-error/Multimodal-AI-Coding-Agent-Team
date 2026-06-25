@@ -4,7 +4,7 @@
     <h1>🧠 多模态代码生成 Agent</h1>
 
     <!-- 控制栏：Prompt 版本选择 + 模型路由 -->
-    <div class="control-bar">
+    <div v-if="stage2Enabled" class="control-bar">
       <div class="control-group">
         <span class="control-label">Prompt 版本：</span>
         <el-select v-model="selectedPromptVersion" placeholder="选择版本" size="small" style="width: 140px">
@@ -78,13 +78,13 @@
       <!-- 部署信息卡片 -->
       <div class="deployment-cards">
         <el-row :gutter="16">
-          <el-col :span="4">
+          <el-col :span="stage2Enabled ? 4 : 6">
             <div class="deploy-card">
               <div class="deploy-label">总耗时</div>
               <div class="deploy-value">{{ result.total_ms || 0 }} <span class="deploy-unit">ms</span></div>
             </div>
           </el-col>
-          <el-col :span="4">
+          <el-col :span="stage2Enabled ? 4 : 6">
             <div class="deploy-card">
               <div class="deploy-label">API 调用</div>
               <div class="deploy-value">
@@ -94,7 +94,7 @@
               </div>
             </div>
           </el-col>
-          <el-col :span="4">
+          <el-col :span="stage2Enabled ? 4 : 6">
             <div class="deploy-card">
               <div class="deploy-label">兜底输出</div>
               <div class="deploy-value">
@@ -104,13 +104,13 @@
               </div>
             </div>
           </el-col>
-          <el-col :span="4">
+          <el-col :span="stage2Enabled ? 4 : 6">
             <div class="deploy-card">
               <div class="deploy-label">代码长度</div>
               <div class="deploy-value">{{ result.code_length || 0 }} <span class="deploy-unit">字符</span></div>
             </div>
           </el-col>
-          <el-col :span="4">
+          <el-col v-if="stage2Enabled" :span="4">
             <div class="deploy-card">
               <div class="deploy-label">使用模型</div>
               <div class="deploy-value" style="font-size: 16px;">
@@ -118,7 +118,7 @@
               </div>
             </div>
           </el-col>
-          <el-col :span="4">
+          <el-col v-if="stage2Enabled" :span="4">
             <div class="deploy-card">
               <div class="deploy-label">Prompt 版本</div>
               <div class="deploy-value" style="font-size: 16px;">
@@ -181,7 +181,7 @@
           </div>
         </el-tab-pane>
 
-        <el-tab-pane label="Trace 详情" name="trace">
+        <el-tab-pane v-if="stage2Enabled" label="Trace 详情" name="trace">
           <div class="tab-content">
             <TraceDetail :trace-id="result.trace_id" :trace-data="traceData" />
           </div>
@@ -233,7 +233,16 @@
       </div>
     </el-card>
 
-    <el-empty v-if="!result && !loading" description="提交题目后，结果将在这里显示" />
+    <el-alert
+      v-if="taskError && !loading"
+      title="任务执行失败"
+      :description="taskError"
+      type="error"
+      show-icon
+      :closable="false"
+      class="task-error"
+    />
+    <el-empty v-if="!result && !loading && !taskError" description="提交题目后，结果将在这里显示" />
   </div>
 </template>
 
@@ -267,6 +276,7 @@ const uploadFile = ref(null)
 const uploadFileName = ref('')
 const loading = ref(false)
 const result = ref(null)
+const taskError = ref('')
 const taskId = ref(null)
 const agentSteps = ref([])
 const rerunLoading = ref(false)
@@ -278,6 +288,7 @@ const selectedPromptVersion = ref('')
 const promptVersions = ref([])
 const currentModel = ref('')
 const traceData = ref({})
+const stage2Enabled = import.meta.env.VITE_ENABLE_STAGE2 === 'true'
 let progressTimer = null
 
 const renderedProblem = computed(() => {
@@ -292,7 +303,7 @@ const renderedSolution = computed(() => {
 
 const renderedDocument = computed(() => {
   if (!result.value) return ''
-  return marked(JSON.stringify(result.value, null, 2))
+  return marked(result.value.project_document || '暂无项目文档。')
 })
 
 const codeLines = computed(() => {
@@ -303,6 +314,7 @@ const codeLines = computed(() => {
 
 // 加载 Prompt 版本列表
 const loadPromptVersions = async () => {
+  if (!stage2Enabled) return
   try {
     const response = await getPromptVersions()
     if (response.data.code === 0) {
@@ -414,6 +426,7 @@ const submitTask = async () => {
   // 立即显示进度
   loading.value = true
   result.value = null
+  taskError.value = ''
   agentSteps.value = []
   traceData.value = {}
   activeTab.value = 'problem'
@@ -444,22 +457,28 @@ const submitTask = async () => {
       taskId.value = data.task_id
       
       const finalResult = await pollTaskStatus(taskId.value)
+      if (finalResult.status === 'failed') {
+        taskError.value = finalResult.error || finalResult.notes || '任务执行失败'
+        stopProgress()
+        progressStatus.value = 'exception'
+        progressHint.value = '任务执行失败'
+        ElMessage.error(taskError.value)
+        return
+      }
       
       finalResult.code_length = finalResult.code ? finalResult.code.length : 0
-      // 从后端读取 api_call，如果没有则默认为 true
-      finalResult.api_call = finalResult.api_call ?? true
-      finalResult.fallback_used = finalResult.fallback_used || false
+      finalResult.api_call = Boolean(finalResult.api_call)
+      finalResult.fallback_used = Boolean(finalResult.fallback_used)
       finalResult.notes = finalResult.notes || '请确保输入符合题目要求，代码在 Python 3.10+ 环境中运行。'
-      finalResult.model_name = finalResult.model_name || 'qwen-max'
-      finalResult.prompt_version = finalResult.prompt_version || selectedPromptVersion.value || 'v1.0'
+      finalResult.model_name = finalResult.model_name || finalResult.metrics?.text_model || '—'
+      finalResult.prompt_version = finalResult.prompt_version || selectedPromptVersion.value || '—'
       
       result.value = finalResult
       currentModel.value = finalResult.model_name
       
-      await Promise.all([
-        fetchAgentSteps(taskId.value),
-        fetchTraceData(taskId.value)
-      ])
+      const followUpRequests = [fetchAgentSteps(taskId.value)]
+      if (stage2Enabled) followUpRequests.push(fetchTraceData(taskId.value))
+      await Promise.all(followUpRequests)
       
       stopProgress()
       ElMessage.success('生成成功！')
@@ -473,27 +492,8 @@ const submitTask = async () => {
     stopProgress()
     progressStatus.value = 'exception'
     if (!error.isImageUpload404) {
-      ElMessage.error(handleApiError(error, '请求失败，请检查后端是否启动'))
-      // 设置兜底数据，让页面不空白
-      result.value = {
-        task_id: 'fallback_' + Date.now(),
-        status: 'failed',
-        problem: problemText.value || '（输入为空）',
-        solution_markdown: '❌ 生成失败，请检查后端服务是否正常运行。\n\n错误信息：' + (error.message || '未知错误'),
-        code: '# 生成失败，请检查后端服务',
-        execution_report: { 
-          stdout: '', 
-          stderr: error.message || '后端服务不可用', 
-          exit_code: 1 
-        },
-        total_ms: 0,
-        api_call: false,
-        fallback_used: true,
-        code_length: 0,
-        model_name: '—',
-        prompt_version: '—',
-        notes: '系统使用了兜底输出，请检查后端配置'
-      }
+      taskError.value = handleApiError(error, '请求失败，请检查后端是否启动')
+      ElMessage.error(taskError.value)
     }
   } finally {
     loading.value = false
@@ -561,18 +561,24 @@ const copyCode = () => {
 const handleRerun = async () => {
   if (!taskId.value) return
   rerunLoading.value = true
+  taskError.value = ''
   try {
     const response = await rerunTask(taskId.value)
     if (response.data.code === 0) {
       ElMessage.success('已重新执行')
+      taskId.value = response.data.data.task_id
       const finalResult = await pollTaskStatus(taskId.value)
+      if (finalResult.status === 'failed') {
+        taskError.value = finalResult.error || finalResult.notes || '重新执行失败'
+        ElMessage.error(taskError.value)
+        return
+      }
       finalResult.code_length = finalResult.code ? finalResult.code.length : 0
       result.value = finalResult
-      currentModel.value = finalResult.model_name || 'qwen-max'
-      await Promise.all([
-        fetchAgentSteps(taskId.value),
-        fetchTraceData(taskId.value)
-      ])
+      currentModel.value = finalResult.model_name || finalResult.metrics?.text_model || '—'
+      const followUpRequests = [fetchAgentSteps(taskId.value)]
+      if (stage2Enabled) followUpRequests.push(fetchTraceData(taskId.value))
+      await Promise.all(followUpRequests)
     }
   } catch (error) {
     console.error('重新执行失败:', error)
@@ -593,6 +599,7 @@ onUnmounted(() => {
 
 <style scoped>
 .home-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+.task-error { margin-bottom: 20px; }
 
 .control-bar {
   display: flex;

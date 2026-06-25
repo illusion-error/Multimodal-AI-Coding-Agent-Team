@@ -26,13 +26,16 @@ export const createImageTask = (imageFile, supplementText = '') => {
 // ===== 任务相关 =====
 export const getTaskList = () => api.get('/api/tasks')
 export const getTaskDetail = (taskId) => api.get(`/api/tasks/${taskId}`)
-export const getTaskReport = (taskId) => api.get(`/api/tasks/${taskId}/report`)
+export const getTaskReport = (taskId) => api.get(`/api/tasks/${taskId}/report`, {
+  responseType: 'text',
+})
 
 // ===== Agent 步骤 =====
 export const getTaskSteps = (taskId) => api.get(`/api/tasks/${taskId}/steps`)
 
 // ===== 测试用例 =====
 export const getTaskTests = (taskId) => api.get(`/api/tasks/${taskId}/tests`)
+export const getTaskRepairs = (taskId) => api.get(`/api/tasks/${taskId}/repairs`)
 
 // ===== 指标看板 =====
 export const getMetricsSummary = () => api.get('/api/metrics/summary')
@@ -91,9 +94,9 @@ export const handleApiError = (error, defaultMessage = '请求失败') => {
     } else if (status === 401 || status === 403) {
       return '权限不足，请检查配置'
     } else if (status === 400) {
-      return error.response.data?.message || '请求参数错误'
+      return error.response.data?.message || error.response.data?.detail || '请求参数错误'
     }
-    return error.response.data?.message || defaultMessage
+    return error.response.data?.message || error.response.data?.detail || defaultMessage
   } else if (error.code === 'ECONNABORTED') {
     return '请求超时，请检查网络或稍后重试'
   } else if (error.message?.includes('Network Error')) {
