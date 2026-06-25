@@ -9,7 +9,11 @@
 - 失败修复：执行失败后最多自动修复 3 轮。
 - Vue 3 前端、FastAPI 后端和 SQLite 历史记录。
 - 文本及图片任务、状态轮询、Agent Timeline、测试记录和报告下载。
-- 统一受限执行器与自动评测器。
+- 浏览器请求级百炼 API Key，不写入任务历史、报告或数据库。
+- 图片真实格式、尺寸和体积校验，拒绝伪装图片。
+- 统一受限执行器与逐用例自动评测器。
+- 模型不可用时使用本地算法模板完成确定性修复。
+- 可在题目框粘贴待调试的 Python 代码，页面提供稳定自动修复示例。
 - 5 道真实 Benchmark 跑批及结果持久化。
 - Docker Compose 部署和 GitHub Actions 自动测试。
 - 无 API Key 时使用离线兜底，仍能完整演示流程。
@@ -56,6 +60,10 @@ DASHSCOPE_API_KEY=你的百炼APIKey
 ```
 
 不要提交 `.env`。没有 API Key 时系统会自动使用离线兜底。
+
+也可以直接在 Vue 首页的“百炼 API Key”输入框中填写。页面填写的 Key
+只通过当前任务请求头传给后端，刷新页面后清空，不会写入数据库和日志。
+上传截图并要求视觉识别时必须提供 Key；没有 Key 时需要同时填写题目补充说明。
 
 ## 本地运行
 
@@ -110,6 +118,14 @@ GET  /api/tasks/{id}/report
 POST /api/tasks/{id}/rerun
 GET  /api/metrics/summary
 ```
+
+`POST /api/tasks/text`、`POST /api/tasks/image` 和重跑接口支持请求头：
+
+```text
+X-DashScope-API-Key: 你的百炼 API Key
+```
+
+图片接口只接受真实 PNG、JPEG、WebP 文件，最大 10MB、最大 2500 万像素。
 
 第二阶段已提供 Benchmark 数据接口：
 
@@ -181,5 +197,9 @@ SQLite 数据通过 `backend_data` 卷持久化。
 ## 安全说明
 
 第一阶段执行器使用 AST 检查、临时目录、隔离模式 Python、最小环境变量、超时和输出限制。它适合课程项目和受控算法代码，但不等同于操作系统级安全边界。
+
+任务只有在生成代码退出码为 0 且结构化测试用例全部通过时才会标记为
+`completed`。测试失败会标记为 `failed`，页面仍会展示代码、Agent 步骤、
+失败用例和修复记录。
 
 第二阶段面向不可信代码时，应切换到 Docker Sandbox 或 E2B，并限制网络、CPU、内存、进程数和文件系统权限。

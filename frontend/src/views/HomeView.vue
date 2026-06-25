@@ -25,6 +25,22 @@
 
     <!-- 输入区 -->
     <el-card class="input-card">
+      <div class="api-key-row">
+        <el-input
+          v-model="apiKey"
+          type="password"
+          show-password
+          clearable
+          autocomplete="off"
+          placeholder="输入阿里云百炼 API Key（不填写时使用离线兜底）"
+        >
+          <template #prepend>百炼 API Key</template>
+        </el-input>
+        <el-tag :type="apiKey.trim() ? 'success' : 'info'">
+          {{ apiKey.trim() ? '本次请求使用自有 Key' : '离线模式' }}
+        </el-tag>
+      </div>
+
       <el-input
         v-model="problemText"
         type="textarea"
@@ -39,7 +55,7 @@
           :auto-upload="false"
           :on-change="handleFileChange"
           :limit="1"
-          accept="image/*"
+          accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
         >
           <el-button type="primary" plain>📷 上传题目截图</el-button>
         </el-upload>
@@ -63,6 +79,9 @@
         :disabled="!problemText.trim() && !uploadFile"
       >
         {{ loading ? '生成中...' : '🚀 生成解法、执行代码并生成文档' }}
+      </el-button>
+      <el-button :disabled="loading" @click="loadRepairDemo">
+        载入自动修复示例
       </el-button>
     </el-card>
 
@@ -175,6 +194,45 @@
           </div>
         </el-tab-pane>
 
+        <el-tab-pane label="自动测试" name="tests">
+          <div class="tab-content">
+            <el-table :data="testCases" empty-text="暂无测试用例">
+              <el-table-column prop="category" label="类型" width="120" />
+              <el-table-column prop="input" label="输入" min-width="180" />
+              <el-table-column prop="expected" label="期望" min-width="130" />
+              <el-table-column prop="actual" label="实际" min-width="130" />
+              <el-table-column label="结果" width="90">
+                <template #default="{ row }">
+                  <el-tag :type="row.passed ? 'success' : 'danger'">
+                    {{ row.passed ? '通过' : '失败' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="duration_ms" label="耗时(ms)" width="100" />
+              <el-table-column prop="error" label="错误" min-width="160" />
+            </el-table>
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="修复记录" name="repairs">
+          <div class="tab-content">
+            <el-empty v-if="repairLogs.length === 0" description="本次代码一次运行通过，未触发修复" />
+            <el-timeline v-else>
+              <el-timeline-item
+                v-for="item in repairLogs"
+                :key="item.log_id"
+                :type="item.repair_success ? 'success' : 'danger'"
+                :timestamp="`第 ${item.repair_round} 轮 · ${item.duration_ms || 0} ms`"
+              >
+                <p>{{ item.error_msg || '已执行修复' }}</p>
+                <el-tag :type="item.repair_success ? 'success' : 'danger'" size="small">
+                  {{ item.repair_success ? '修复成功' : '修复失败' }}
+                </el-tag>
+              </el-timeline-item>
+            </el-timeline>
+          </div>
+        </el-tab-pane>
+
         <el-tab-pane label="Agent Timeline" name="timeline">
           <div class="tab-content">
             <AgentTimeline :steps="agentSteps" />
@@ -254,6 +312,8 @@ import {
   createTextTask,
   getTaskReport,
   getTaskSteps,
+  getTaskTests,
+  getTaskRepairs,
   getTaskTrace,
   rerunTask,
   pollTaskStatus,
@@ -272,13 +332,17 @@ marked.setOptions({
 
 const problemText = ref('')
 const supplementText = ref('')
+const apiKey = ref('')
 const uploadFile = ref(null)
 const uploadFileName = ref('')
+const uploadRef = ref(null)
 const loading = ref(false)
 const result = ref(null)
 const taskError = ref('')
 const taskId = ref(null)
 const agentSteps = ref([])
+const testCases = ref([])
+const repairLogs = ref([])
 const rerunLoading = ref(false)
 const progress = ref(0)
 const progressStatus = ref('')
@@ -346,6 +410,17 @@ const applyPromptVersion = async () => {
 }
 
 const handleFileChange = (file) => {
+  const allowedTypes = ['image/png', 'image/jpeg', 'image/webp']
+  if (!allowedTypes.includes(file.raw?.type)) {
+    ElMessage.error('仅支持 PNG、JPEG、WebP 图片')
+    clearFile()
+    return
+  }
+  if (file.raw.size > 10 * 1024 * 1024) {
+    ElMessage.error('图片大小不能超过 10MB')
+    clearFile()
+    return
+  }
   uploadFile.value = file.raw
   uploadFileName.value = file.name
 }
@@ -353,6 +428,18 @@ const handleFileChange = (file) => {
 const clearFile = () => {
   uploadFile.value = null
   uploadFileName.value = ''
+  uploadRef.value?.clearFiles()
+}
+
+const loadRepairDemo = () => {
+  problemText.value = `请调试并修复下面的两数之和 Python 代码，返回 nums 中和为 target 的两个下标：
+
+\`\`\`python
+def solution(nums, target)
+    return []
+\`\`\``
+  supplementText.value = ''
+  clearFile()
 }
 
 const startProgress = () => {
@@ -400,6 +487,15 @@ const fetchAgentSteps = async (id) => {
   }
 }
 
+const fetchTaskArtifacts = async (id) => {
+  const [testsResponse, repairsResponse] = await Promise.all([
+    getTaskTests(id),
+    getTaskRepairs(id),
+  ])
+  testCases.value = testsResponse.data.code === 0 ? testsResponse.data.data || [] : []
+  repairLogs.value = repairsResponse.data.code === 0 ? repairsResponse.data.data || [] : []
+}
+
 const fetchTraceData = async (id) => {
   try {
     const response = await getTaskTrace(id)
@@ -428,6 +524,8 @@ const submitTask = async () => {
   result.value = null
   taskError.value = ''
   agentSteps.value = []
+  testCases.value = []
+  repairLogs.value = []
   traceData.value = {}
   activeTab.value = 'problem'
   startProgress()
@@ -437,7 +535,11 @@ const submitTask = async () => {
     
     if (uploadFile.value) {
       try {
-        response = await uploadImageWithFallback(uploadFile.value, supplementText.value)
+        response = await uploadImageWithFallback(
+          uploadFile.value,
+          supplementText.value,
+          apiKey.value,
+        )
       } catch (imgError) {
         if (imgError.isImageUpload404) {
           stopProgress()
@@ -449,7 +551,7 @@ const submitTask = async () => {
         throw imgError
       }
     } else {
-      response = await createTextTask(problemText.value)
+      response = await createTextTask(problemText.value, apiKey.value)
     }
 
     if (response.data.code === 0) {
@@ -457,15 +559,6 @@ const submitTask = async () => {
       taskId.value = data.task_id
       
       const finalResult = await pollTaskStatus(taskId.value)
-      if (finalResult.status === 'failed') {
-        taskError.value = finalResult.error || finalResult.notes || '任务执行失败'
-        stopProgress()
-        progressStatus.value = 'exception'
-        progressHint.value = '任务执行失败'
-        ElMessage.error(taskError.value)
-        return
-      }
-      
       finalResult.code_length = finalResult.code ? finalResult.code.length : 0
       finalResult.api_call = Boolean(finalResult.api_call)
       finalResult.fallback_used = Boolean(finalResult.fallback_used)
@@ -476,9 +569,21 @@ const submitTask = async () => {
       result.value = finalResult
       currentModel.value = finalResult.model_name
       
-      const followUpRequests = [fetchAgentSteps(taskId.value)]
+      const followUpRequests = [
+        fetchAgentSteps(taskId.value),
+        fetchTaskArtifacts(taskId.value),
+      ]
       if (stage2Enabled) followUpRequests.push(fetchTraceData(taskId.value))
       await Promise.all(followUpRequests)
+
+      if (finalResult.status === 'failed') {
+        taskError.value = finalResult.error || finalResult.notes || '代码未通过全部自动测试'
+        stopProgress()
+        progressStatus.value = 'exception'
+        progressHint.value = '任务完成，但代码未通过全部测试'
+        ElMessage.error(taskError.value)
+        return
+      }
       
       stopProgress()
       ElMessage.success('生成成功！')
@@ -488,7 +593,6 @@ const submitTask = async () => {
       ElMessage.error(response.data.message || '生成失败')
     }
   } catch (error) {
-    console.error('提交失败:', error)
     stopProgress()
     progressStatus.value = 'exception'
     if (!error.isImageUpload404) {
@@ -563,25 +667,26 @@ const handleRerun = async () => {
   rerunLoading.value = true
   taskError.value = ''
   try {
-    const response = await rerunTask(taskId.value)
+    const response = await rerunTask(taskId.value, apiKey.value)
     if (response.data.code === 0) {
       ElMessage.success('已重新执行')
       taskId.value = response.data.data.task_id
       const finalResult = await pollTaskStatus(taskId.value)
-      if (finalResult.status === 'failed') {
-        taskError.value = finalResult.error || finalResult.notes || '重新执行失败'
-        ElMessage.error(taskError.value)
-        return
-      }
       finalResult.code_length = finalResult.code ? finalResult.code.length : 0
       result.value = finalResult
       currentModel.value = finalResult.model_name || finalResult.metrics?.text_model || '—'
-      const followUpRequests = [fetchAgentSteps(taskId.value)]
+      const followUpRequests = [
+        fetchAgentSteps(taskId.value),
+        fetchTaskArtifacts(taskId.value),
+      ]
       if (stage2Enabled) followUpRequests.push(fetchTraceData(taskId.value))
       await Promise.all(followUpRequests)
+      if (finalResult.status === 'failed') {
+        taskError.value = finalResult.error || finalResult.notes || '代码未通过全部自动测试'
+        ElMessage.error(taskError.value)
+      }
     }
   } catch (error) {
-    console.error('重新执行失败:', error)
     ElMessage.error(handleApiError(error, '重新执行失败'))
   } finally {
     rerunLoading.value = false
@@ -624,6 +729,13 @@ onUnmounted(() => {
 }
 
 .input-card { margin-bottom: 20px; }
+.api-key-row {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
 .upload-area { display: flex; align-items: center; gap: 10px; margin: 12px 0; flex-wrap: wrap; }
 .file-name { color: #409EFF; }
 .supplement-input { margin: 12px 0; }
@@ -741,4 +853,8 @@ onUnmounted(() => {
 .download-buttons { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; }
 .notes-area { margin-top: 16px; }
 .action-buttons { display: flex; gap: 12px; margin-top: 20px; flex-wrap: wrap; justify-content: center; }
+
+@media (max-width: 720px) {
+  .api-key-row { grid-template-columns: 1fr; }
+}
 </style>

@@ -515,10 +515,11 @@ def generate_solution_with_bailian(
 1. 必须放在一个 ```python 代码块中。
 2. 必须是单文件可运行代码。
 3. 尽量包含 solve 函数或核心函数。
-4. 必须包含 _run_tests()，并在 __main__ 中调用，让代码直接运行时一定有输出。
-5. 如果题目没有明确样例，请自己构造 2 到 4 个合理测试用例。
-6. 代码要避免依赖第三方库。
-7. 输出中文说明，但代码注释可以简洁。
+4. 必须把统一评测入口命名为 solution，例如 `solution = two_sum`。
+5. 必须包含 _run_tests()，并在 __main__ 中调用，让代码直接运行时一定有输出。
+6. 如果题目没有明确样例，请自己构造 2 到 4 个合理测试用例。
+7. 代码要避免依赖第三方库。
+8. 输出中文说明，但代码注释可以简洁。
 """
     template_text = format_templates_for_prompt(templates or [])
     user_prompt = f"""
@@ -543,7 +544,7 @@ RAG 算法模板：
     return call_bailian_chat(config, config.text_model, messages), True
 
 
-def offline_test_plan(problem: str, reason: str = "") -> Tuple[str, List[Dict[str, str]]]:
+def offline_test_plan(problem: str, reason: str = "") -> Tuple[str, List[Dict[str, Any]]]:
     """测试生成 Agent 的离线兜底版本。
 
     根据题目关键词生成基础、边界、异常三类测试思路。虽然这里不是
@@ -554,27 +555,49 @@ def offline_test_plan(problem: str, reason: str = "") -> Tuple[str, List[Dict[st
     lower = (problem or "").lower()
     if "two sum" in lower or "两数之和" in problem or "target" in lower:
         cases = [
-            {"name": "基础样例", "input": "nums=[2,7,11,15], target=9", "expected": "[0,1]", "purpose": "验证常规命中"},
-            {"name": "重复数字", "input": "nums=[3,3], target=6", "expected": "[0,1]", "purpose": "验证重复元素"},
-            {"name": "无解情况", "input": "nums=[1,2,3], target=7", "expected": "[] 或题目约定", "purpose": "验证边界处理"},
+            {"name": "基础样例", "args": [[2, 7, 11, 15], 9], "input": "nums=[2,7,11,15], target=9", "expected": [0, 1], "purpose": "验证常规命中"},
+            {"name": "重复数字", "args": [[3, 3], 6], "input": "nums=[3,3], target=6", "expected": [0, 1], "purpose": "验证重复元素"},
+            {"name": "无解情况", "args": [[1, 2, 3], 7], "input": "nums=[1,2,3], target=7", "expected": [], "purpose": "验证边界处理"},
         ]
     elif "回文" in problem or "palindrome" in lower:
         cases = [
-            {"name": "标准回文", "input": "A man, a plan, a canal: Panama", "expected": "True", "purpose": "忽略大小写和符号"},
-            {"name": "非回文", "input": "race a car", "expected": "False", "purpose": "验证失败分支"},
-            {"name": "空字符串", "input": "", "expected": "True", "purpose": "验证空输入"},
+            {"name": "标准回文", "args": ["A man, a plan, a canal: Panama"], "input": "A man, a plan, a canal: Panama", "expected": True, "purpose": "忽略大小写和符号"},
+            {"name": "非回文", "args": ["race a car"], "input": "race a car", "expected": False, "purpose": "验证失败分支"},
+            {"name": "空字符串", "args": [""], "input": "", "expected": True, "purpose": "验证空输入"},
+        ]
+    elif "fibonacci" in lower or "斐波那契" in problem:
+        cases = [
+            {"name": "零项", "args": [0], "input": "n=0", "expected": 0, "purpose": "验证初始边界"},
+            {"name": "第一项", "args": [1], "input": "n=1", "expected": 1, "purpose": "验证初始边界"},
+            {"name": "常规输入", "args": [10], "input": "n=10", "expected": 55, "purpose": "验证迭代结果"},
+        ]
+    elif "最大值" in problem or "maximum" in lower or "max value" in lower:
+        cases = [
+            {"name": "常规数组", "args": [[1, 9, 3, 7]], "input": "[1,9,3,7]", "expected": 9, "purpose": "验证常规最大值"},
+            {"name": "全负数", "args": [[-5, -1, -10]], "input": "[-5,-1,-10]", "expected": -1, "purpose": "验证负数"},
+            {"name": "单元素", "args": [[42]], "input": "[42]", "expected": 42, "purpose": "验证最小规模"},
+        ]
+    elif "反转字符串" in problem or "reverse string" in lower:
+        cases = [
+            {"name": "常规字符串", "args": ["hello"], "input": "hello", "expected": "olleh", "purpose": "验证反转"},
+            {"name": "单字符", "args": ["a"], "input": "a", "expected": "a", "purpose": "验证最小规模"},
+            {"name": "空字符串", "args": [""], "input": "", "expected": "", "purpose": "验证空输入"},
         ]
     elif "情感" in problem or "sentiment" in lower:
         cases = [
-            {"name": "正向文本", "input": "这个产品很好，我非常满意", "expected": "positive", "purpose": "验证正向识别"},
-            {"name": "负向文本", "input": "体验糟糕，不推荐", "expected": "negative", "purpose": "验证负向识别"},
-            {"name": "中性文本", "input": "今天是星期二", "expected": "neutral", "purpose": "验证中性兜底"},
+            {"name": "正向文本", "args": ["这个产品很好，我非常满意"], "input": "这个产品很好，我非常满意", "expected": "positive", "purpose": "验证正向识别"},
+            {"name": "负向文本", "args": ["体验糟糕，不推荐"], "input": "体验糟糕，不推荐", "expected": "negative", "purpose": "验证负向识别"},
+            {"name": "中性文本", "args": ["今天是星期二"], "input": "今天是星期二", "expected": "neutral", "purpose": "验证中性兜底"},
         ]
     else:
         cases = [
-            {"name": "基础样例", "input": "题目给定样例", "expected": "题目给定输出", "purpose": "验证主流程"},
-            {"name": "边界样例", "input": "空输入 / 单元素 / 极值", "expected": "符合题意", "purpose": "验证边界条件"},
-            {"name": "异常样例", "input": "重复值 / 无解 / 大规模输入", "expected": "不崩溃且输出合理", "purpose": "验证鲁棒性"},
+            {
+                "name": "通用兜底",
+                "args": [],
+                "input": "无参数",
+                "expected": "已生成兜底代码：请根据题目补充核心算法逻辑。",
+                "purpose": "验证兜底程序可执行",
+            },
         ]
 
     note = f"\n\n> 测试计划兜底原因：{reason}" if reason else ""
@@ -599,7 +622,7 @@ def generate_tests_with_bailian(
     config: AgentConfig,
     problem: str,
     plan: str,
-) -> Tuple[str, List[Dict[str, str]], bool]:
+) -> Tuple[str, List[Dict[str, Any]], bool]:
     """测试生成 Agent。
 
     注意它在代码生成之前运行。原因是测试计划要作为代码生成 Agent 的
@@ -617,11 +640,27 @@ def generate_tests_with_bailian(
 ## 测试策略
 ## 测试用例
 ## 边界条件
+## 结构化用例
+
+“结构化用例”必须包含一个 JSON 代码块，格式如下：
+```json
+[
+  {
+    "name": "基础样例",
+    "args": [[2, 7, 11, 15], 9],
+    "kwargs": {},
+    "expected": [0, 1],
+    "category": "basic",
+    "purpose": "验证常规输入"
+  }
+]
+```
 
 要求：
 1. 至少给出 3 个测试用例。
 2. 覆盖基础样例、边界样例、异常或极端样例。
 3. 每个用例说明输入、期望输出和测试目的。
+4. args 必须是 JSON 数组，expected 必须是可直接比较的 JSON 值。
 """
     user_prompt = f"""
 题目：
@@ -635,7 +674,27 @@ def generate_tests_with_bailian(
         {"role": "user", "content": user_prompt.strip()},
     ]
     content = call_bailian_chat(config, config.text_model, messages)
-    fallback_plan, cases = offline_test_plan(problem)
+    cases: List[Dict[str, Any]] = []
+    json_blocks = re.findall(r"```json\s*(.*?)```", content, flags=re.DOTALL | re.IGNORECASE)
+    for block in json_blocks:
+        try:
+            parsed = json.loads(block)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(parsed, list):
+            continue
+        valid_cases = [
+            item
+            for item in parsed
+            if isinstance(item, dict)
+            and isinstance(item.get("args", []), list)
+            and "expected" in item
+        ]
+        if valid_cases:
+            cases = valid_cases
+            break
+    if not cases:
+        _, cases = offline_test_plan(problem, "模型未返回可解析的结构化测试用例。")
     return content, cases, True
 
 
@@ -1047,12 +1106,48 @@ def execution_succeeded(execution_report: str) -> bool:
 
     report = execution_report or ""
     normalized = report.replace(" ", "").lower()
-    return (
+    test_rate = re.search(r"自动测试通过率[：:]\s*([0-9.]+)%", report)
+    tests_passed = not test_rate or float(test_rate.group(1)) == 100.0
+    return tests_passed and (
         "退出码：0" in normalized
         or "退出码:0" in normalized
         or "exitcode:0" in normalized
         or "returncode:0" in normalized
     )
+
+
+def evaluate_python_code(
+    code: str,
+    test_cases: List[Dict[str, Any]],
+    timeout_seconds: int,
+) -> Tuple[str, List[Dict[str, Any]]]:
+    """运行代码并逐条执行结构化测试用例。"""
+
+    execution_report = run_python_code(code, timeout_seconds)
+    if not execution_succeeded(execution_report) or not test_cases:
+        return execution_report, []
+
+    from sandbox.evaluator import run_auto_tests
+
+    auto_report = run_auto_tests(
+        code,
+        test_cases,
+        timeout_seconds=timeout_seconds,
+        task_id="agent-evaluation",
+    )
+    execution_report += (
+        "\n\n"
+        f"自动测试：{auto_report['passed']}/{auto_report['total']}\n"
+        f"自动测试通过率：{auto_report['pass_rate']}%"
+    )
+    failed_messages = [
+        f"{item.get('name', '用例')}：{item.get('error') or item.get('actual')}"
+        for item in auto_report["details"]
+        if not item.get("passed")
+    ]
+    if failed_messages:
+        execution_report += "\n失败用例：\n- " + "\n- ".join(failed_messages)
+    return execution_report, auto_report["details"]
 
 
 def agent_result_to_dict(result: AgentResult) -> Dict[str, Any]:
@@ -1112,7 +1207,15 @@ def run_execution_debug_agent(
     problem: str,
     code: str,
     test_plan: str,
-) -> Tuple[str, str, List[Dict[str, Any]], bool, bool]:
+    test_cases: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[
+    str,
+    str,
+    List[Dict[str, Any]],
+    List[Dict[str, Any]],
+    bool,
+    bool,
+]:
     """执行调试 Agent。
 
     这是完整闭环里的最后一个 Agent。它先本地运行生成代码：
@@ -1131,19 +1234,41 @@ def run_execution_debug_agent(
     api_used = False
     fallback_used = False
     repair_attempts: List[Dict[str, Any]] = []
+    evaluated_cases: List[Dict[str, Any]] = []
+    test_cases = test_cases or []
 
     if not code:
-        return code, "未提取到可执行代码。", repair_attempts, api_used, True
+        return code, "未提取到可执行代码。", repair_attempts, evaluated_cases, api_used, True
 
     if not config.enable_local_execution:
-        return code, "本地执行未开启：已生成代码，但未运行。", repair_attempts, api_used, fallback_used
+        return (
+            code,
+            "本地执行未开启：已生成代码，但未运行。",
+            repair_attempts,
+            evaluated_cases,
+            api_used,
+            fallback_used,
+        )
 
     current_code = code
-    execution_report = run_python_code(current_code, config.execution_timeout)
+    execution_report, evaluated_cases = evaluate_python_code(
+        current_code,
+        test_cases,
+        config.execution_timeout,
+    )
     if execution_succeeded(execution_report):
-        return current_code, execution_report, repair_attempts, api_used, fallback_used
+        return (
+            current_code,
+            execution_report,
+            repair_attempts,
+            evaluated_cases,
+            api_used,
+            fallback_used,
+        )
 
     for round_index in range(1, 4):
+        round_started = now_ms()
+        old_code = current_code
         try:
             repair_markdown, used = repair_code_with_bailian(
                 config=config,
@@ -1154,42 +1279,59 @@ def run_execution_debug_agent(
             )
             api_used = api_used or used
             repaired_code = extract_code(repair_markdown) or repair_markdown.strip()
-            if not repaired_code:
-                repair_attempts.append(
-                    {
-                        "round": round_index,
-                        "status": "failed",
-                        "reason": "调试 Agent 没有返回可用代码。",
-                    }
-                )
-                fallback_used = True
-                break
-
-            current_code = repaired_code
-            new_report = run_python_code(current_code, config.execution_timeout)
-            repair_attempts.append(
-                {
-                    "round": round_index,
-                    "status": "passed" if execution_succeeded(new_report) else "failed",
-                    "reason": "调试 Agent 已根据执行日志生成修复代码。",
-                    "execution_report": shorten_text(new_report, 1200),
-                }
-            )
-            execution_report = new_report
-            if execution_succeeded(execution_report):
-                break
         except Exception as exc:
+            # 无 Key、额度不足或模型不可用时，使用本地题型模板完成确定性修复。
+            repair_markdown = offline_solution(
+                problem,
+                f"模型调试不可用，启用本地修复：{exc}",
+            )
+            repaired_code = extract_code(repair_markdown)
+            fallback_used = True
+            repair_reason = f"模型调试不可用，已使用本地算法模板修复：{exc}"
+        else:
+            repair_reason = "调试 Agent 已根据执行日志生成修复代码。"
+
+        if not repaired_code:
             repair_attempts.append(
                 {
                     "round": round_index,
-                    "status": "skipped",
-                    "reason": str(exc),
+                    "status": "failed",
+                    "reason": "调试 Agent 没有返回可用代码。",
+                    "old_code": old_code,
+                    "new_code": "",
+                    "duration_ms": now_ms() - round_started,
                 }
             )
-            fallback_used = True
             break
 
-    return current_code, execution_report, repair_attempts, api_used, fallback_used
+        current_code = repaired_code
+        execution_report, evaluated_cases = evaluate_python_code(
+            current_code,
+            test_cases,
+            config.execution_timeout,
+        )
+        repair_attempts.append(
+            {
+                "round": round_index,
+                "status": "passed" if execution_succeeded(execution_report) else "failed",
+                "reason": repair_reason,
+                "old_code": old_code,
+                "new_code": current_code,
+                "duration_ms": now_ms() - round_started,
+                "execution_report": shorten_text(execution_report, 1200),
+            }
+        )
+        if execution_succeeded(execution_report):
+            break
+
+    return (
+        current_code,
+        execution_report,
+        repair_attempts,
+        evaluated_cases,
+        api_used,
+        fallback_used,
+    )
 
 
 def build_project_document(
@@ -1375,7 +1517,7 @@ def solve_problem(
     agent_steps: List[AgentStep] = []
     retrieved_templates: List[Dict[str, Any]] = []
     test_plan = ""
-    test_cases: List[Dict[str, str]] = []
+    test_cases: List[Dict[str, Any]] = []
     repair_attempts: List[Dict[str, Any]] = []
 
     input_type = "text"
@@ -1482,26 +1624,40 @@ def solve_problem(
     # Agent 4：代码生成。
     # 输入包含题面、规划、RAG 模板和测试计划，输出 Markdown 与 Python 代码块。
     step_started = now_ms()
-    try:
-        solution_markdown, used = generate_solution_with_bailian(
-            config=config,
-            problem=problem,
-            plan=plan_markdown,
-            templates=retrieved_templates,
-            test_plan=test_plan,
+    provided_code = extract_code(problem)
+    repair_request = bool(
+        provided_code
+        and re.search(r"修复|调试|纠错|fix|debug|repair", problem, flags=re.IGNORECASE)
+    )
+    if repair_request:
+        solution_markdown = (
+            "## 待修复代码\n\n"
+            "系统检测到用户提供的 Python 代码，将直接交给执行调试 Agent。\n\n"
+            f"```python\n{provided_code}\n```"
         )
-        api_used = api_used or used
         generation_error = ""
-        generation_status = "completed"
-    except Exception as exc:
-        generation_error = str(exc)
-        errors.append(generation_error)
-        if not config.enable_offline_fallback:
-            solution_markdown = f"## 生成失败\n\n{exc}"
-        else:
-            solution_markdown = offline_solution(problem, generation_error)
-            fallback_used = True
-        generation_status = "fallback"
+        generation_status = "provided"
+    else:
+        try:
+            solution_markdown, used = generate_solution_with_bailian(
+                config=config,
+                problem=problem,
+                plan=plan_markdown,
+                templates=retrieved_templates,
+                test_plan=test_plan,
+            )
+            api_used = api_used or used
+            generation_error = ""
+            generation_status = "completed"
+        except Exception as exc:
+            generation_error = str(exc)
+            errors.append(generation_error)
+            if not config.enable_offline_fallback:
+                solution_markdown = f"## 生成失败\n\n{exc}"
+            else:
+                solution_markdown = offline_solution(problem, generation_error)
+                fallback_used = True
+            generation_status = "fallback"
 
     code, code_fallback = ensure_code(solution_markdown, problem)
     fallback_used = fallback_used or code_fallback
@@ -1524,14 +1680,24 @@ def solve_problem(
     # Agent 5：执行调试。
     # 本地运行生成代码；失败时把日志交给调试 Agent，最多修复 3 轮。
     step_started = now_ms()
-    final_code, execution_report, repair_attempts, used, repair_fallback = run_execution_debug_agent(
+    (
+        final_code,
+        execution_report,
+        repair_attempts,
+        evaluated_cases,
+        used,
+        repair_fallback,
+    ) = run_execution_debug_agent(
         config=config,
         problem=problem,
         code=code,
         test_plan=test_plan,
+        test_cases=test_cases,
     )
     api_used = api_used or used
     fallback_used = fallback_used or repair_fallback
+    if evaluated_cases:
+        test_cases = evaluated_cases
     if final_code != code:
         solution_markdown += "\n\n## 自动调试修复\n\n执行调试 Agent 已根据运行日志修复代码，最终版本请查看“Python 代码”页签。"
     code = final_code

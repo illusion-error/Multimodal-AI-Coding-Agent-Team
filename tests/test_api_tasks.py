@@ -36,3 +36,62 @@ def test_text_task_full_workflow(client):
     metrics = client.get("/api/metrics/summary").json()["data"]
     assert metrics["total_tasks"] == 2
     assert metrics["success_tasks"] == 2
+
+
+def test_failed_execution_is_not_counted_as_completed(client, monkeypatch):
+    import backend.main as backend_main
+
+    original_solve = backend_main.solve_problem
+
+    def return_failed_result(*args, **kwargs):
+        result = original_solve(*args, **kwargs)
+        result.execution_report = "状态：failed\n\n退出码：1\n\n错误输出：测试失败"
+        result.test_cases = [
+            {
+                "name": "失败用例",
+                "input": "1",
+                "expected": "2",
+                "actual": "1",
+                "passed": False,
+                "category": "basic",
+                "duration_ms": 1,
+                "error": "expected 2, got 1",
+            }
+        ]
+        return result
+
+    monkeypatch.setattr(backend_main, "solve_problem", return_failed_result)
+    created = client.post(
+        "/api/tasks/text",
+        json={"problem_text": "two sum: return indices for nums and target"},
+    )
+    task_id = created.json()["data"]["task_id"]
+    detail = client.get(f"/api/tasks/{task_id}").json()["data"]
+    metrics = client.get("/api/metrics/summary").json()["data"]
+
+    assert detail["status"] == "failed"
+    assert metrics["success_tasks"] == 0
+    assert metrics["failed_tasks"] == 1
+    assert metrics["test_pass_rate"] == 0
+
+
+def test_pasted_broken_code_triggers_visible_repair_workflow(client):
+    problem = """
+请调试并修复下面的两数之和 Python 代码：
+
+```python
+def solution(nums, target)
+    return []
+```
+"""
+    created = client.post("/api/tasks/text", json={"problem_text": problem})
+    task_id = created.json()["data"]["task_id"]
+    detail = client.get(f"/api/tasks/{task_id}").json()["data"]
+    repairs = client.get(f"/api/tasks/{task_id}/repairs").json()["data"]
+    tests = client.get(f"/api/tasks/{task_id}/tests").json()["data"]
+
+    assert detail["status"] == "completed"
+    assert len(repairs) == 1
+    assert repairs[0]["repair_success"] is True
+    assert len(tests) == 3
+    assert all(case["passed"] for case in tests)

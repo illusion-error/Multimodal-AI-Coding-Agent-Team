@@ -1,0 +1,407 @@
+多模态代码生成 Agent
+第一阶段后端与第二阶段前端联调修改清单
+
+检查版本：503a940
+检查日期：2026-06-24
+
+一、当前结论
+
+1. 前端第二阶段组件已经补齐，npm run build 可以成功。
+2. 第一阶段后端接口名称基本补齐，但真实 Agent 没有接入，目前所有任务只会返回模拟加法代码。
+3. 数据库返回格式与 main.py 的读取方式不一致，历史列表、Agent 步骤、测试用例存在严重错误。
+4. 图片上传、报告下载、重新执行等接口与前端约定不一致。
+5. Trace、Prompt 版本和 Benchmark 属于第二阶段，后端目前没有对应接口。
+6. 当前版本不能作为第一阶段验收版本，需要先完成 B、C 的数据适配，再让 A 联调。
+
+
+二、P0：必须立即处理的安全问题
+
+1. backend/.env 已经被提交到 Git，且 DASHSCOPE_API_KEY 不是空值。
+
+处理要求：
+- 立即在阿里云百炼控制台作废当前密钥并创建新密钥。
+- 执行 git rm --cached backend/.env，使它不再被 Git 跟踪。
+- 本地保留 backend/.env，但不得再次提交。
+- .env.example 只保留空值示例。
+- 即使删除仓库里的文件，旧密钥仍存在于 Git 历史，因此必须更换密钥。
+
+2. .env.example 字段与程序不一致。
+
+当前写的是：
+API_KEY=
+SERVER_PORT=8001
+
+程序实际读取：
+DASHSCOPE_API_KEY
+
+建议改成：
+DASHSCOPE_API_KEY=
+VITE_API_BASE_URL=http://127.0.0.1:8000
+
+
+三、P0：成员 B 第一阶段后端必须修改
+
+1. 接入真实 Agent，删除永久模拟模式
+
+当前问题：
+- backend/main.py 中 AGENT_AVAILABLE 永远为 False。
+- 没有真正导入 AgentConfig、AgentResult 和 solve_problem。
+- 页面得到的是固定的 add(a, b) 模拟代码。
+
+修改要求：
+- 从唯一的 ai_coding_agent_bailian.py 导入 AgentConfig 和 solve_problem。
+- 使用 DASHSCOPE_API_KEY 创建 AgentConfig。
+- 正确调用：
+  solve_problem(config=config, text_problem=problem_text, ...)
+- API 没有密钥时可以使用 C 的离线兜底，但不能使用后端自造的固定模拟结果。
+
+2. 不要维护两份 Agent 主程序
+
+当前问题：
+- 根目录有 ai_coding_agent_bailian.py。
+- backend 下又复制了一份相同文件。
+- C 修改根目录版本后，后端副本可能不同步。
+
+修改要求：
+- 只保留根目录 ai_coding_agent_bailian.py 作为唯一来源。
+- backend/main.py 从根目录模块导入。
+- Docker 构建时同时复制根目录 Agent 文件和 backend 目录。
+
+3. 修正 AgentResult 适配方式
+
+当前问题：
+- solve_problem 返回 AgentResult 数据类，不是 dict。
+- 后端使用 result.get(...)，接入真实 Agent 后会立即报错。
+
+正确字段映射：
+- result.problem -> problem
+- result.solution_markdown -> solution_markdown
+- result.code -> code
+- result.execution_report -> 执行结果
+- result.project_document -> 完整报告
+- result.metrics -> total_ms、模型、运行状态等
+- result.agent_steps -> Agent 步骤表
+- result.retrieved_templates -> rag_hits
+- result.test_plan -> 测试计划
+- result.repair_attempts -> 修复日志
+- result.api_used -> api_call
+- result.fallback_used -> fallback_used
+
+4. 修正数据库字典读取错误
+
+当前问题：
+- database.py 的 list_all_tasks、get_steps_by_task、get_tests_by_task 返回字典。
+- main.py 仍按旧元组方式拆包。
+- 实测历史列表返回：
+  task_id = "task_id"
+  status = "status"
+  created_at = "created_at"
+
+修改要求：
+- 全部改成 row["task_id"]、row["status"] 等字典读取方式。
+- 步骤和测试接口同样按字段名读取。
+
+5. 禁止使用 INSERT OR REPLACE 更新任务
+
+当前问题：
+- 任务开始时插入 running 记录。
+- 执行过程中插入 Agent 步骤和测试用例。
+- 完成时 INSERT OR REPLACE 会先删除旧任务。
+- 外键级联删除会把刚写入的步骤和测试一起删除。
+- 实测步骤接口和测试接口最终均为空数组。
+
+修改要求：
+- 使用 INSERT ... ON CONFLICT(task_id) DO UPDATE。
+- 或分别实现 create_task 和 update_task。
+- 更新状态时必须保留原 created_at。
+
+6. 修正图片上传字段
+
+当前问题：
+- 前端 FormData 使用字段 image。
+- 后端参数名是 file。
+- 实测前端格式请求返回 422。
+
+修改要求：
+- 后端改为 image: UploadFile = File(...)。
+- 校验 MIME 类型和文件大小。
+- 把真实 image_bytes、content_type 和补充文本传给 solve_problem。
+- 不得只把文件名和大小拼成“模拟题目”。
+
+7. 修正历史列表返回字段
+
+前端历史页面需要：
+- task_id
+- status
+- problem
+- created_at
+- total_ms
+
+当前后端只查询 task_id、status、created_at。
+
+修改要求：
+- 从 data JSON 中取出 problem 和 total_ms。
+- 返回前端所需的完整摘要。
+
+8. 修正 Agent 步骤返回字段
+
+建议统一返回：
+- agent_name
+- role
+- status
+- input
+- output
+- duration_ms
+- error
+
+当前后端返回 name 和 duration，而 AgentTimeline 读取 step_name/agent_name 和 duration_ms。
+
+9. 修正报告下载接口
+
+当前问题：
+- 后端返回 JSON：{code, message, data: markdown}。
+- 前端把整个 response.data 当 Markdown 文件。
+- 下载后可能得到 JSON 或 [object Object]。
+- 后端生成的 Markdown 代码块没有闭合。
+
+推荐方案：
+- 后端直接返回 text/markdown 的 Response。
+- 优先返回 result.project_document。
+- 文件名通过 Content-Disposition 指定。
+
+10. 修正重新执行协议
+
+当前问题：
+- 后端重新执行时创建新 task_id。
+- 前端仍轮询旧 task_id。
+- 页面会显示旧结果，无法看到新任务结果。
+
+二选一：
+- 方案 A：后端复用原 task_id，清理旧步骤后重新执行。
+- 方案 B：后端返回新 task_id，前端立即更新 taskId 并轮询新 ID。
+
+推荐方案 B，保留原任务和重跑任务之间的 original_task_id 关系。
+
+11. 正确保存测试用例和修复日志
+
+当前问题：
+- execution_logs 表已建立，但 main.py 没有写入。
+- C 的 repair_attempts 没有保存。
+- C 内部生成了 test_cases，但 AgentResult 当前没有返回该字段。
+
+处理方式：
+- C 给 AgentResult 增加 test_cases 字段。
+- B 将 test_cases 写入 test_cases 表。
+- B 将 repair_attempts 写入 execution_logs 表。
+
+12. 规范 execution_report
+
+当前问题：
+- C 当前返回字符串。
+- 前端和数据库指标按对象读取 exit_code、stdout、stderr。
+
+建议后端统一转换为：
+{
+  "exit_code": 0,
+  "stdout": "...",
+  "stderr": "",
+  "raw": "原始执行报告"
+}
+
+13. 修正后端启动编码问题
+
+当前问题：
+- Windows GBK 环境下，startup_event 中的 emoji 会导致 UnicodeEncodeError。
+- 实测后端启动阶段直接退出。
+
+修改要求：
+- 后端日志不使用 emoji。
+- 或统一设置 UTF-8 日志输出，但代码本身仍建议使用普通文字日志。
+
+14. 补充 python-multipart 依赖
+
+图片上传接口依赖 python-multipart，但 requirements.txt 和 backend/requirements.txt 都没有声明。
+
+必须加入：
+python-multipart
+
+15. 修正包导入与 Docker 启动路径
+
+当前问题：
+- backend/main.py 使用 from database import ...。
+- 从项目根目录执行 import backend.main 会报 ModuleNotFoundError。
+- Docker 构建上下文是 ./backend，但 CMD 使用 backend.main:app。
+- 镜像内只有 /app/main.py，没有 /app/backend/main.py。
+
+建议结构：
+- docker-compose 的 backend build context 改为项目根目录。
+- dockerfile 指向 backend/Dockerfile。
+- Docker 中复制：
+  ai_coding_agent_bailian.py
+  backend/
+  requirements.txt
+- main.py 使用 from backend.database import ... 或相对导入。
+- CMD 使用 uvicorn backend.main:app。
+
+
+四、P1：成员 B 后端建议修改
+
+1. problem_text 必须去空格后非空，空题目返回 400。
+2. 图片限制格式为 PNG/JPEG/WebP，并限制最大体积。
+3. 任务不存在时，steps/tests 接口应返回 404，而不是空数组。
+4. 数据库写任务、步骤、测试、日志应使用同一事务，避免半成品。
+5. Agent 异常要记录错误类型和 traceback，但不要把密钥写入日志。
+6. 后台任务失败后必须保留 task_id、problem、created_at 和错误信息。
+7. CORS 不应长期使用 allow_origins=["*"]，开发阶段至少限制为 5173。
+8. 数据库查询 Agent 步骤时增加 ORDER BY step_id。
+9. 报告、任务和步骤接口增加统一响应格式和接口测试。
+10. FastAPI 的 on_event 已弃用，后续可改 lifespan；第一阶段不阻断。
+
+
+五、成员 C 第一阶段需要补的最小改动
+
+1. AgentResult 增加 test_cases 字段。
+2. 明确 AgentResult 到后端 JSON 的字段契约。
+3. 不再让后端复制一份 Agent 文件，确保 C 只维护一个源文件。
+4. 确认五个 Agent 的 step 字段为：
+   name、role、status、input_summary、output_summary、duration_ms、error。
+5. 确认 repair_attempts 中包含：
+   round、error、old_code、new_code、success。
+6. 保持现有顺序：
+   题目识别 -> 解题规划 -> 测试生成 -> 代码生成 -> 执行调试。
+
+注意：
+C 现在不要继续开发第二阶段状态机、Tool Registry 等功能。
+先帮助 B 完成 AgentResult 适配，确保第一阶段真实数据能从后端返回。
+
+
+六、成员 A 前端修改清单
+
+第一阶段必须修改：
+
+1. 图片上传字段必须与后端统一为 image。
+2. 报告下载根据最终接口处理：
+   - 后端返回纯 Markdown 时使用 response.data。
+   - 后端保留 JSON 包装时使用 response.data.data。
+3. 重跑后使用后端返回的新 task_id：
+   taskId.value = response.data.data.task_id
+4. AgentTimeline 与后端统一字段：
+   agent_name、duration_ms、input、output、error。
+5. 历史页依赖后端返回 problem 和 total_ms，联调确认不再为空。
+6. 失败时不要伪装成“成功生成的结果”；应清楚显示任务失败状态。
+
+第二阶段暂时处理：
+
+7. Trace、Prompt 版本和 Benchmark 后端接口尚未实现。
+8. 在第一阶段验收前，使用 VITE_ENABLE_STAGE2=false 隐藏：
+   - Prompt 版本选择
+   - Trace 详情
+   - Benchmark 图表
+9. 不要删除现有第二阶段组件，保留代码，等第二阶段后端完成再开启。
+10. 前端当前 npm run build 已通过，但 JS 包约 2.2MB，属于后续性能优化项，不阻断第一阶段。
+
+
+七、成员 D 部署与测试修改清单
+
+1. 修正 Docker 构建上下文和 backend.main 启动路径。
+2. requirements 补充 python-multipart。
+3. Docker Compose 增加后端 healthcheck。
+4. 前端 depends_on 使用后端健康状态，而不只是进程启动。
+5. 修复 evaluator.py 的 timeout 参数和返回字段不一致问题。
+6. Benchmark 必须读取真实题库并执行，不得输出硬编码指标。
+7. 沙盒当前仍是宿主机 Python 子进程，不是真正的文件和内存隔离。
+8. 第一阶段至少完成超时、危险调用拦截和真实测试报告；真正 Docker Sandbox 可放第二阶段。
+
+
+八、第二阶段前端当前状态
+
+已完成：
+- AgentTimeline.vue 已实现。
+- TraceDetail.vue 已实现。
+- BenchmarkCharts.vue 已实现。
+- 前端可以正常构建。
+- 进度条可以在请求开始后立即显示。
+- 历史详情不再因步骤接口失败而完全打不开。
+
+尚未完成联调：
+- GET /api/tasks/{id}/trace
+- GET /api/prompt/versions
+- POST /api/prompt/version
+- GET /api/benchmark/results
+- model_name、prompt_version、trace_id 等真实字段
+
+因此第二阶段前端当前属于“页面完成、后端能力未完成”，不能作为完整功能验收。
+
+
+九、推荐推进顺序
+
+步骤 1：立即处理密钥
+- 作废已提交的百炼密钥。
+- 创建新密钥。
+- 从 Git 跟踪中删除 backend/.env。
+
+步骤 2：冻结 main
+- 当前 503a940 保留为备份点。
+- 新建 integration/stage1 分支。
+- 第一阶段修复只合并到 integration/stage1。
+
+步骤 3：C 先确定结果契约
+- 增加 test_cases。
+- 给 B 一份 AgentResult 字段说明。
+- 确定唯一 Agent 源文件。
+
+步骤 4：B 完成真实 Agent 和数据库适配
+- 接入 AgentConfig、solve_problem。
+- 修复数据库更新、字典读取和接口字段。
+- 完成文本、图片、步骤、测试、历史、报告、重跑、指标接口。
+
+步骤 5：A 只做第一阶段联调
+- 临时隐藏第二阶段入口。
+- 修复图片、报告、重跑和步骤字段。
+- 用真实后端完成页面联调。
+
+步骤 6：D 做部署验收
+- 修复 Docker。
+- 运行自动测试。
+- 输出真实测试报告。
+
+步骤 7：第一阶段验收并打标签
+- 全部验收通过后合并 main。
+- 创建标签 v1.0-stage1。
+
+步骤 8：恢复第二阶段
+- 从 v1.0-stage1 创建 stage2 分支。
+- 打开 VITE_ENABLE_STAGE2。
+- 再实现 Trace、Prompt、Benchmark 和模型路由后端。
+
+
+十、第一阶段验收标准
+
+[ ] 后端普通 Windows PowerShell 中可以启动。
+[ ] npm run build 成功。
+[ ] Docker Compose 可以完成构建并启动。
+[ ] 文本题返回真实五 Agent 结果，不是固定模拟代码。
+[ ] 图片题真正调用视觉识别流程。
+[ ] 页面显示五个 Agent 步骤和正确耗时。
+[ ] RAG 模板能够返回并记录。
+[ ] 测试用例能够保存和查询。
+[ ] 失败任务能够记录修复过程。
+[ ] 历史列表显示题目、状态、时间和耗时。
+[ ] 报告下载后内容是正常 Markdown。
+[ ] 重跑后页面显示新任务结果。
+[ ] 指标来自真实数据库数据。
+[ ] 仓库中不存在 API Key、数据库文件和运行日志。
+[ ] 准备 3 道稳定演示题并连续运行成功。
+
+
+十一、最终判断
+
+当前不需要撤回 A 已完成的第二阶段前端代码，也不建议 C 重新做整个第二阶段。
+
+最有效率的做法是：
+1. 用功能开关暂时隐藏第二阶段页面；
+2. C 先给出稳定数据契约；
+3. B 修好真实 Agent 和第一阶段接口；
+4. A 根据真实接口完成联调；
+5. D 最后验证 Docker 和测试；
+6. 第一阶段打标签后，再继续第二阶段后端。

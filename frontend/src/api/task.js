@@ -7,19 +7,35 @@ const api = axios.create({
   timeout: 60000,
 })
 
+const apiKeyConfig = (apiKey = '') => {
+  const value = apiKey.trim()
+  return value
+    ? { headers: { 'X-DashScope-API-Key': value } }
+    : {}
+}
+
 // ===== 基础接口 =====
 export const healthCheck = () => api.get('/api/health')
 
-export const createTextTask = (problemText) => {
-  return api.post('/api/tasks/text', { problem_text: problemText })
+export const createTextTask = (problemText, apiKey = '') => {
+  return api.post(
+    '/api/tasks/text',
+    { problem_text: problemText },
+    apiKeyConfig(apiKey),
+  )
 }
 
-export const createImageTask = (imageFile, supplementText = '') => {
+export const createImageTask = (imageFile, supplementText = '', apiKey = '') => {
   const formData = new FormData()
   formData.append('image', imageFile)
   formData.append('supplement', supplementText)
+  const config = apiKeyConfig(apiKey)
   return api.post('/api/tasks/image', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
+    ...config,
+    headers: {
+      ...config.headers,
+      'Content-Type': 'multipart/form-data',
+    },
   })
 }
 
@@ -41,7 +57,9 @@ export const getTaskRepairs = (taskId) => api.get(`/api/tasks/${taskId}/repairs`
 export const getMetricsSummary = () => api.get('/api/metrics/summary')
 
 // ===== 重新执行 =====
-export const rerunTask = (taskId) => api.post(`/api/tasks/${taskId}/rerun`)
+export const rerunTask = (taskId, apiKey = '') => (
+  api.post(`/api/tasks/${taskId}/rerun`, null, apiKeyConfig(apiKey))
+)
 
 // ===== Trace 详情 =====
 export const getTaskTrace = (taskId) => api.get(`/api/tasks/${taskId}/trace`)
@@ -58,7 +76,7 @@ export const updatePromptVersion = (agentName, version) => {
 export const getBenchmarkData = () => api.get('/api/benchmark/results')
 
 // ===== 轮询任务状态 =====
-export const pollTaskStatus = async (taskId, interval = 2000, maxAttempts = 60) => {
+export const pollTaskStatus = async (taskId, interval = 2000, maxAttempts = 180) => {
   let attempts = 0
   return new Promise((resolve, reject) => {
     const timer = setInterval(async () => {
@@ -106,9 +124,9 @@ export const handleApiError = (error, defaultMessage = '请求失败') => {
 }
 
 // ===== 带友好提示的图片上传 =====
-export const uploadImageWithFallback = async (imageFile, supplementText = '') => {
+export const uploadImageWithFallback = async (imageFile, supplementText = '', apiKey = '') => {
   try {
-    const response = await createImageTask(imageFile, supplementText)
+    const response = await createImageTask(imageFile, supplementText, apiKey)
     return response
   } catch (error) {
     if (error.response && error.response.status === 404) {

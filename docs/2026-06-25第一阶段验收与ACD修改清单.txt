@@ -1,0 +1,710 @@
+多模态代码生成 Agent
+第一阶段验收、第二阶段隔离与 A/B/C/D 完整修改清单
+
+检查日期：2026-06-25
+GitHub main 最新提交：259110c
+检查范围：第一阶段后端、成员 C Agent、第二阶段前端、成员 D 评测与部署
+
+
+一、最终结论
+
+1. GitHub 当前第一阶段后端没有改好。
+
+截至 2026-06-25，远端只有 main 分支。
+最新提交 259110c 只修改了：
+- benchmark_data.json
+- sandbox/benchmark_runner.py
+- sandbox/code_runner.py
+- docs/test_report.md
+
+backend/main.py 和 backend/database.py 自 503a940 后没有新提交。
+如果后端成员已经在本地修改，说明尚未推送到 GitHub，当前无法检查其本地版本。
+
+2. 成员 A 的第二阶段前端已经从“空文件”升级为可构建页面，但没有完成后端联调。
+
+已完成：
+- Agent Timeline 页面组件
+- Trace 详情组件
+- Benchmark 图表组件
+- Prompt 版本选择界面
+- 前端 npm run build 成功
+
+未完成：
+- Trace 后端接口
+- Prompt 版本后端接口
+- Benchmark 后端接口
+- 模型名称、Prompt 版本、trace_id 等真实数据
+- 与第一阶段图片、报告、重跑接口的完整联调
+
+3. 成员 D 的第二阶段仍未完成。
+
+当前 Benchmark 虽然读取了 5 道题，但没有执行题目：
+- total_passed = total_q - 1 是写死的。
+- total_time_ms = total_q * 1200 是写死的。
+- 输出的 80% 和 1200ms 不是实际评测结果。
+
+自动评测器仍会报错：
+TypeError: execute_code_safely() got an unexpected keyword argument 'timeout'
+
+当前沙盒仍可访问宿主机绝对路径。
+实测可以列出 C:\Windows 内容，并可通过简单字符串拼接绕过 open/read 关键词检查读取 C:\Windows\win.ini。
+
+4. 当前不能进行第一阶段正式验收。
+
+文本接口虽然返回 200，但只返回固定模拟加法代码。
+历史、步骤、测试、图片、报告、重跑等流程存在阻断问题。
+
+
+二、是否让成员 A、D 回退第二阶段
+
+不建议直接删除文件、强制回退 main 或让她们重新做。
+
+推荐做法：
+
+1. 在当前提交 259110c 创建备份分支：
+   backup/stage2-ad
+
+2. 新建第一阶段联调分支：
+   integration/stage1
+
+3. A 暂时使用功能开关隐藏第二阶段入口：
+   VITE_ENABLE_STAGE2=false
+
+隐藏内容：
+- Prompt 版本选择
+- Trace 详情
+- Benchmark 图表
+- 尚未有后端支持的模型路由展示
+
+4. D 的 benchmark_runner.py 可以保留，但不纳入第一阶段运行链路。
+
+5. D 的 code_runner.py 和 evaluator.py 属于第一阶段共用能力，不能继续带着错误使用。
+必须立即修复；如果短时间修不好，应暂时恢复到一个接口一致、测试通过的版本。
+
+6. 第一阶段通过后创建标签：
+   v1.0-stage1
+
+7. 再从 v1.0-stage1 创建 stage2 分支，把 A、D 已有成果继续接入。
+
+结论：
+不是“全部回退”，而是“保留成果、隐藏入口、冻结第二阶段、先完成第一阶段联调”。
+
+
+三、P0 安全问题：必须先处理
+
+1. backend/.env 已经被 Git 跟踪。
+
+检查结果：
+- backend/.env 在 Git 跟踪列表中。
+- DASHSCOPE_API_KEY 是非空值。
+
+必须执行：
+- 立即在阿里云百炼控制台作废当前 API Key。
+- 创建新的 API Key。
+- 从 Git 跟踪中移除 backend/.env。
+- 本地可以保留 backend/.env，但以后不能提交。
+- 仅提交 .env.example，且密钥值必须为空。
+
+注意：
+仅删除当前文件不能消除 Git 历史中的旧密钥，因此必须更换密钥。
+
+2. .env.example 字段错误。
+
+当前：
+API_KEY=
+SERVER_PORT=8001
+
+程序实际需要：
+DASHSCOPE_API_KEY=
+VITE_API_BASE_URL=http://127.0.0.1:8000
+
+
+四、成员 B：第一阶段后端必须修改
+
+P0-1：真正接入成员 C 的 Agent
+
+当前：
+- AGENT_AVAILABLE 永远为 False。
+- 后端没有真正导入 AgentConfig、AgentResult、solve_problem。
+- 所有题目最终返回固定 add(a, b) 模拟代码。
+
+要求：
+- 删除固定模拟加法流程。
+- 没有 API Key 时使用 C 已实现的离线兜底。
+- 有 API Key 时调用百炼。
+- 返回真实五 Agent、RAG、测试计划、执行结果和修复记录。
+
+正确调用形式：
+config = AgentConfig(
+    api_key=os.getenv("DASHSCOPE_API_KEY", ""),
+    enable_local_execution=True,
+    enable_offline_fallback=True
+)
+
+result = solve_problem(
+    config=config,
+    text_problem=problem_text,
+    image_bytes=image_bytes,
+    image_mime=image_mime
+)
+
+P0-2：正确适配 AgentResult
+
+solve_problem 返回 dataclass AgentResult，不是 dict。
+当前后端使用 result.get(...)，即使把 AGENT_AVAILABLE 改成 True 也会报错。
+
+必须使用：
+- result.problem
+- result.solution_markdown
+- result.code
+- result.execution_report
+- result.project_document
+- result.metrics
+- result.agent_steps
+- result.retrieved_templates
+- result.test_plan
+- result.repair_attempts
+- result.api_used
+- result.fallback_used
+
+P0-3：只保留一份 Agent 主程序
+
+当前存在：
+- 根目录 ai_coding_agent_bailian.py
+- backend/ai_coding_agent_bailian.py
+
+风险：
+C 修改根目录文件后，后端副本不会自动同步。
+
+要求：
+- 根目录文件作为唯一业务源文件。
+- backend 通过正确模块路径导入。
+- Docker 构建时复制根目录 Agent 文件。
+
+P0-4：修复数据库返回字典与 main.py 元组拆包冲突
+
+database.py 当前返回字典。
+main.py 仍使用：
+for row in rows:
+    tid, status, ctime = row
+
+字典迭代得到的是键名。
+
+实测历史接口返回：
+{
+  "task_id": "task_id",
+  "status": "status",
+  "created_at": "created_at"
+}
+
+必须改成：
+- row["task_id"]
+- row["status"]
+- row["created_at"]
+
+步骤和测试接口也必须按字典字段读取。
+
+P0-5：禁止 INSERT OR REPLACE 更新任务
+
+当前流程：
+1. 创建 running 任务。
+2. 插入 Agent 步骤和测试。
+3. 完成后 INSERT OR REPLACE 主任务。
+4. SQLite 先删除旧任务。
+5. 外键级联删除步骤和测试。
+
+实测结果：
+- /steps 返回 []
+- /tests 返回 []
+
+要求：
+- 创建任务使用 INSERT。
+- 更新任务使用 UPDATE。
+- 或使用 ON CONFLICT DO UPDATE，但不得删除原主记录。
+- 更新状态时保留 created_at。
+
+P0-6：修复图片接口
+
+当前前端发送：
+image
+
+当前后端接收：
+file
+
+实测前端格式返回 HTTP 422。
+
+而且后端目前不识别图片，只把文件名和体积拼成模拟题目。
+
+要求：
+- 后端参数改为 image: UploadFile。
+- 校验 PNG/JPEG/WebP。
+- 设置最大文件体积。
+- 将真实图片 bytes、MIME 类型和 supplement 传给 solve_problem。
+
+P0-7：修复历史接口字段
+
+前端需要：
+- task_id
+- status
+- problem
+- created_at
+- total_ms
+
+当前后端只返回三个字段，而且返回内容错误。
+
+P0-8：统一 Agent 步骤字段
+
+建议后端返回：
+{
+  "agent_name": "题目识别 Agent",
+  "role": "...",
+  "status": "completed",
+  "input": "...",
+  "output": "...",
+  "duration_ms": 123,
+  "error": ""
+}
+
+当前后端使用 name、duration，前端 Timeline 主要读取 agent_name/step_name 和 duration_ms。
+
+P0-9：统一 execution_report
+
+C 当前 execution_report 是字符串。
+前端和数据库按对象读取：
+- exit_code
+- stdout
+- stderr
+
+后端应统一转换为：
+{
+  "exit_code": 0,
+  "stdout": "...",
+  "stderr": "",
+  "raw": "原始执行报告"
+}
+
+P0-10：修复报告下载
+
+当前后端返回：
+{
+  "code": 0,
+  "data": "Markdown"
+}
+
+前端把 response.data 整体当成 Markdown 文件。
+而且当前 Markdown 代码块没有闭合。
+
+推荐：
+- 后端直接返回 text/markdown Response。
+- 内容优先使用 result.project_document。
+- 设置 Content-Disposition 文件名。
+
+P0-11：修复重新执行
+
+后端创建新 task_id。
+前端仍轮询旧 task_id。
+
+要求：
+- 后端返回新 task_id。
+- 前端更新 taskId.value 后轮询新任务。
+- 保存 original_task_id 关联。
+
+P0-12：保存测试和修复日志
+
+当前 execution_logs 表已创建，但后端没有写入。
+
+要求：
+- C 返回 test_cases。
+- B 写入 test_cases 表。
+- B 将 repair_attempts 写入 execution_logs。
+- /tests 返回真实测试结果。
+- 指标接口从真实数据计算。
+
+P0-13：修复 Windows 启动编码
+
+startup_event 中的 emoji 在部分 Windows GBK 终端中会引发 UnicodeEncodeError，导致后端启动失败。
+
+要求：
+- 后端日志不使用 emoji。
+- 日志统一使用普通 ASCII/中文。
+
+P0-14：补充 python-multipart
+
+图片上传需要 python-multipart。
+requirements.txt 和 backend/requirements.txt 当前没有声明。
+
+P0-15：修复 Docker 包路径
+
+当前：
+- compose 的 backend context 是 ./backend。
+- Dockerfile CMD 是 backend.main:app。
+- 镜像中 main.py 位于 /app/main.py，不存在 /app/backend/main.py。
+- 根目录 Agent 文件不在构建上下文。
+
+要求：
+- backend 构建上下文改为项目根目录。
+- Dockerfile 复制根目录 Agent 和 backend 包。
+- main.py 使用包内导入。
+- CMD 与最终目录结构一致。
+
+P1 建议：
+- 空白 problem_text 返回 400。
+- 图片大小、格式、空文件校验。
+- steps/tests 对不存在任务返回 404。
+- Agent 步骤按 step_id 排序。
+- 数据库操作使用事务。
+- CORS 限制为本地前端地址。
+- 增加 FastAPI 自动化接口测试。
+
+
+五、成员 A：前端修改清单
+
+第一阶段必须修改：
+
+1. 使用功能开关隐藏第二阶段功能。
+
+建议：
+VITE_ENABLE_STAGE2=false
+
+隐藏：
+- Prompt 版本控制栏
+- Trace 页签
+- Benchmark 图表
+- 尚无真实数据的模型路由字段
+
+2. 图片字段与后端统一为 image。
+
+3. 报告下载根据最终接口读取纯文本，不能把 JSON 包装直接写入文件。
+
+4. 重跑时更新 taskId：
+taskId.value = response.data.data.task_id
+
+当前代码拿到新 ID 后仍轮询旧 ID。
+
+5. AgentTimeline 字段与后端统一。
+
+6. 历史页面依赖 problem、total_ms，B 修复后必须完成真实联调。
+
+7. API 失败时可以展示错误面板，但不要把前端自造的失败数据当成真实后端任务结果。
+
+8. 第一阶段页面至少测试：
+- 文本提交
+- 图片提交
+- 轮询状态
+- 五 Agent 步骤
+- 代码和执行结果
+- 历史列表与详情
+- 报告下载
+- 重新执行
+- 指标页基础指标
+
+第二阶段当前状态：
+- AgentTimeline 组件：已实现。
+- TraceDetail 组件：已实现，但无后端数据。
+- BenchmarkCharts 组件：已实现，但无 Benchmark API。
+- Prompt 版本：只有前端控件，无后端接口。
+- 前端构建成功。
+
+第二阶段后端接口未完成：
+- GET /api/tasks/{id}/trace
+- GET /api/prompt/versions
+- POST /api/prompt/version
+- GET /api/benchmark/results
+
+
+六、成员 D：完整修改清单
+
+P0-1：修复 evaluator 参数错误
+
+当前 evaluator 调用：
+execute_code_safely(test_script, timeout=3)
+
+code_runner 参数为：
+timeout_seconds
+
+实测自动评测器立即报 TypeError。
+
+P0-2：Benchmark 必须真正执行
+
+当前虽然读取 5 道题，但结果仍是模拟：
+- 假设固定错 1 道。
+- 假设每题固定 1200ms。
+- 没有调用 C Agent。
+- 没有调用 evaluator。
+- 没有执行每个 test_case。
+
+真实流程应为：
+1. 读取题库。
+2. 调用 Agent 生成代码。
+3. 使用 evaluator 执行每个测试用例。
+4. 汇总真实通过数、失败数、耗时和错误。
+5. 将每道题明细写入数据库。
+6. /api/benchmark/results 返回前端需要的结构。
+
+P0-3：沙盒仍可逃逸
+
+当前 cwd=temp_dir 只能改变默认工作目录，不能限制绝对路径访问。
+
+实测：
+- 可读取 C:\Windows 目录。
+- 通过字符串拼接可以绕过 open/read 关键词检查并读取文件。
+
+要求：
+- 第一阶段至少明确这是“受限子进程”，不要宣称真正安全隔离。
+- 第二阶段使用 Docker Sandbox 或 E2B。
+- 容器内设置只读文件系统、临时目录、网络禁用、CPU/内存/进程数和超时限制。
+
+P0-4：关键词检查误伤正常代码
+
+forbidden_words 中包含 read。
+
+实测以下正常代码被拦截：
+- breadth = 3
+- import threading
+
+要求：
+- 不要用简单子字符串匹配。
+- 使用 ast 解析 import、函数调用和属性访问。
+- 明确允许列表和禁止列表。
+
+P0-5：统一 code_runner 返回结构
+
+建议所有情况都返回：
+{
+  "status": "success|failed|timeout|blocked",
+  "stdout": "",
+  "stderr": "",
+  "exit_code": 0,
+  "timeout": false,
+  "duration_ms": 0
+}
+
+当前 blocked 返回 message，failed 返回 stderr，success 没有 exit_code，结构不统一。
+
+P0-6：测试报告与当前代码不一致
+
+报告写：
+- 图片接口 405。
+- 超时输出“>5秒，已强制中断”。
+- 沙盒已成功隔离。
+
+实际：
+- 图片接口存在，但前端字段请求为 422。
+- 当前超时文本是“运行超时，沙盒强制终止”。
+- 沙盒仍能访问绝对路径。
+
+要求：
+- 测试报告必须由真实测试命令生成或附测试日志。
+- 不得把模拟指标描述为真实结果。
+
+P0-7：Benchmark 数据库未与后端指标系统统一
+
+D 新建 metrics 表。
+B 的 calc_metrics 完全不读取该表。
+前端请求 /api/benchmark/results，但后端没有接口。
+
+要求：
+- B、D 共同确定 metrics/benchmark_results 表结构。
+- 不要在脚本里私自创建另一套孤立指标表。
+
+P0-8：D 的执行器没有接入 C 的执行调试 Agent
+
+C 的 ai_coding_agent_bailian.py 内部仍使用自己的 run_python_code。
+D 的 code_runner/evaluator 是另一套独立逻辑。
+
+要求：
+- 第一阶段确定唯一执行入口。
+- 建议 C 的执行调试 Agent 调用 D 提供的统一 runner 接口。
+- 或第一阶段先保留 C 执行器，D 只提供独立验收测试，不能同时宣称已经集成。
+
+P1 建议：
+- 题库至少增加空输入、极值、重复值和异常输入。
+- 题库记录 difficulty、category、timeout。
+- Benchmark 保存每道题的真实结果。
+- 增加 pytest 自动测试。
+- CI 中运行前端构建、Python 测试和接口测试。
+
+
+七、成员 C：你现在应该怎么做
+
+你不需要重新做 A、D 的整个第二阶段。
+
+你当前最重要的任务是完成“Agent 数据契约和后端适配支持”。
+
+C-1：AgentResult 增加 test_cases
+
+当前 solve_problem 内部已经生成 test_cases，但 AgentResult 没有返回。
+
+增加字段：
+test_cases: List[Dict[str, Any]]
+
+返回内容至少包括：
+- input
+- expected
+- actual（执行后填写）
+- passed（执行后填写）
+- category
+
+C-2：提供标准序列化函数
+
+建议在 Agent 文件中增加：
+agent_result_to_dict(result)
+
+统一生成 B 可直接保存的结构，避免 B 自己猜字段。
+
+应包含：
+- problem
+- solution_markdown
+- code
+- execution_report
+- project_document
+- metrics
+- agent_steps
+- retrieved_templates
+- test_plan
+- test_cases
+- repair_attempts
+- api_used
+- fallback_used
+- error
+
+C-3：确定 AgentStep 标准
+
+统一字段：
+- agent_name
+- role
+- status
+- input
+- output
+- duration_ms
+- error
+
+C-4：与 B 一起完成一次适配
+
+C 不必重写 FastAPI，但需要：
+- 告诉 B solve_problem 正确调用方式。
+- 告诉 B AgentResult 不是 dict。
+- 验证 B 返回的 5 个 Agent 数据没有丢失。
+- 验证 RAG 模板、测试计划和修复记录进入数据库。
+
+C-5：消除两份 Agent 文件
+
+只维护根目录版本。
+后端不应复制 C 的文件。
+
+C-6：决定执行器集成边界
+
+第一阶段建议二选一：
+
+方案 A：
+继续使用 C 当前 run_python_code，D 的 runner 只用于独立验收。
+
+方案 B：
+C 的执行调试 Agent 调用 D 修复后的统一 runner。
+
+不要让两套执行器同时作为“正式执行结果来源”。
+
+C-7：你暂时不要做
+
+- 多 Agent 状态机深化
+- Tool Registry
+- Prompt 版本管理
+- 模型路由
+- 混合检索与重排序
+- 第二阶段 Trace 后端
+
+先确保第一阶段端到端可运行。
+
+
+八、推荐团队推进顺序
+
+第 1 步：B 推送真实后端分支
+
+如果 B 已修改但没推送：
+- 建立 feature/backend-stage1。
+- 推送到 GitHub。
+- 不要直接覆盖 main。
+
+第 2 步：C 提交数据契约
+
+在 feature/c-agent-contract：
+- 增加 test_cases。
+- 增加 AgentResult 序列化。
+- 删除或停止维护后端重复 Agent 文件。
+
+第 3 步：B 合并 C 契约并修后端
+
+完成：
+- 真实 Agent
+- 数据库
+- 图片
+- 步骤
+- 测试
+- 报告
+- 重跑
+- 指标
+
+第 4 步：A 进行第一阶段联调
+
+- 关闭第二阶段功能开关。
+- 逐个接口测试。
+- 不再增加第二阶段页面。
+
+第 5 步：D 修复共用测试能力
+
+- 修 evaluator。
+- 统一返回结构。
+- 真实运行 5 道 Benchmark。
+- 修改真实测试报告。
+- 暂时不要宣称宿主机子进程是安全沙盒。
+
+第 6 步：集成测试
+
+在 integration/stage1：
+- 后端接口测试。
+- 前端构建。
+- 文本任务。
+- 图片任务。
+- 五 Agent 和 RAG。
+- 自动测试和修复记录。
+- 历史和报告。
+- Docker。
+
+第 7 步：发布第一阶段
+
+- 全部通过后合并 main。
+- 创建 v1.0-stage1。
+- 再恢复第二阶段功能。
+
+
+九、第一阶段必须通过的验收表
+
+[ ] 仓库中不包含 API Key。
+[ ] 后端可以在普通 Windows PowerShell 启动。
+[ ] 前端 npm run build 成功。
+[ ] Docker Compose 构建并启动成功。
+[ ] 文本题返回真实 AgentResult，不是固定加法模拟。
+[ ] 图片题真正调用视觉模型或离线兜底识别。
+[ ] 页面展示 5 个 Agent 步骤。
+[ ] 页面展示真实 RAG 模板。
+[ ] 测试用例保存并可查询。
+[ ] 失败修复记录保存并可查询。
+[ ] 历史列表显示题目和耗时。
+[ ] 报告下载内容是正常 Markdown。
+[ ] 重跑后显示新任务结果。
+[ ] 指标由真实数据库计算。
+[ ] evaluator 自动测试能够运行。
+[ ] Benchmark 实际执行 5 道题，不使用固定结果。
+[ ] 测试报告与真实运行日志一致。
+[ ] 准备 3 道连续运行成功的答辩示例。
+
+
+十、一句话决策
+
+后端第一阶段目前没有改好，GitHub 上也没有看到新的后端提交。
+
+A、D 不需要删除第二阶段成果，但必须立即冻结第二阶段开发：
+- A 用功能开关隐藏第二阶段入口，回到第一阶段联调。
+- D 修复会影响第一阶段的 evaluator/code_runner，Benchmark 暂时独立保存。
+- C 先完成 AgentResult 数据契约，协助 B 把真实五 Agent 接入后端。
+- 第一阶段通过并打标签后，再继续第二阶段。

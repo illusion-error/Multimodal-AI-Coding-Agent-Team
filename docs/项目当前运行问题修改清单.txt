@@ -1,0 +1,403 @@
+多模态代码生成 Agent 项目当前运行问题修改清单
+
+检查时间：2026-06-23
+检查版本：Git 提交 4ef45ee
+检查结论：项目可以启动前端和后端，文本任务基础链路可以跑通，但前后端完整闭环尚未完成。
+
+
+一、当前已经能正常运行的部分
+
+1. 前端 Vue3 项目可以启动。
+   验证结果：http://127.0.0.1:5173 可以访问。
+
+2. 前端可以正常构建。
+   验证结果：npm run build 成功。
+   备注：构建时有依赖库体积警告和 pure annotation 警告，但不影响运行。
+
+3. 后端 FastAPI 可以启动。
+   验证结果：http://127.0.0.1:8000 可以启动。
+
+4. 健康检查接口正常。
+   接口：GET /api/health
+   返回：code = 0，status = ok。
+
+5. 文本任务提交接口可以跑通。
+   接口：POST /api/tasks/text
+   验证结果：可以返回 task_id 和 completed 状态。
+
+6. 任务详情接口可以查询结果。
+   接口：GET /api/tasks/{task_id}
+   验证结果：可以返回 problem、solution_markdown、code、execution_report。
+
+7. 报告下载接口可以返回 Markdown 内容。
+   接口：GET /api/tasks/{task_id}/report
+   验证结果：返回 text/markdown; charset=utf-8。
+
+
+二、必须修改的问题
+
+1. 后端缺少前端正在调用的接口。
+
+   前端已经写了这些接口调用，但后端没有实现：
+
+   1. POST /api/tasks/image
+      当前结果：405 Method Not Allowed
+      影响：前端上传题目截图功能不能用。
+      建议：后端增加图片上传接口，至少先支持接收 image 文件和 supplement 文本，并调用现有 solve_problem 的图片输入能力；如果短期不做图片识别，也要返回清晰提示，不能让前端直接失败。
+
+   2. GET /api/tasks/{task_id}/steps
+      当前结果：404 Not Found
+      影响：前端 Agent 执行链路区域无法展示 5 个 Agent 步骤。
+      建议：后端保存并返回题目识别 Agent、解题规划 Agent、测试生成 Agent、代码生成 Agent、执行调试 Agent 的输入、输出、状态、耗时。
+
+   3. GET /api/tasks/{task_id}/tests
+      当前结果：404 Not Found
+      影响：前端无法展示测试用例和测试结果。
+      建议：后端返回测试用例列表，包括输入、期望输出、实际输出、是否通过、错误信息。
+
+   4. POST /api/tasks/{task_id}/rerun
+      当前结果：404 Not Found
+      影响：前端“重新执行”按钮不可用。
+      建议：后端根据原任务输入重新运行 Agent 流程，并更新任务结果。
+
+   5. GET /api/metrics/summary
+      当前结果：404 Not Found
+      影响：前端指标看板无法加载数据。
+      建议：后端统计 total_tasks、success_tasks、failed_tasks、success_rate、avg_response_time、test_pass_rate、code_run_rate、repair_rate 等指标。
+
+
+2. requirements.txt 缺少后端依赖。
+
+   当前根目录 requirements.txt 主要是 Streamlit 单文件项目依赖，没有包含后端 FastAPI 所需依赖。
+
+   必须补充：
+
+   fastapi
+   uvicorn
+   python-dotenv
+
+   影响：新电脑克隆项目后，按 requirements.txt 安装依赖，后端会因为缺少 fastapi 无法启动。
+
+
+3. Docker 后端构建配置有问题。
+
+   当前 backend/Dockerfile 中写了：
+
+   COPY requirements.txt .
+
+   但 docker-compose.yml 的后端构建目录是：
+
+   build: ./backend
+
+   backend 目录下没有 requirements.txt，所以 Docker 构建会失败。
+
+   另外，后端 main.py 需要导入根目录的 ai_coding_agent_bailian.py，但当前 Docker 构建上下文只有 backend 目录，容器里也拿不到根目录的 ai_coding_agent_bailian.py。
+
+   建议二选一：
+
+   方案 A：把后端 build context 改成项目根目录，并在 Dockerfile 中复制 backend、ai_coding_agent_bailian.py、requirements.txt、sandbox 等需要的文件。
+
+   方案 B：把 ai_coding_agent_bailian.py、requirements.txt 和必要模块移动或复制到 backend 目录，并调整导入路径。
+
+
+4. benchmark_data.json 是空文件。
+
+   当前问题：文件存在但内容为空。
+   影响：不能证明已经完成 Benchmark 测试题库。
+   建议：至少写入 5 到 10 道测试题，例如两数之和、斐波那契、括号匹配、最长无重复子串、二分查找、爬楼梯、岛屿数量等。
+
+   每道题建议包含：
+
+   id
+   title
+   problem_text
+   difficulty
+   tags
+   expected_keywords
+   sample_tests
+
+
+5. sandbox/evaluator.py 是空文件。
+
+   当前问题：文件存在但没有实现。
+   影响：不能证明成员 D 的“自动评测机”功能已经完成。
+   建议：至少实现一个基础评测函数，可以读取 benchmark_data.json，逐题调用系统接口或本地函数，统计成功率、测试通过率、平均耗时和失败原因。
+
+
+6. backend/tasks.db 被提交进了 Git 仓库。
+
+   当前 .gitignore 已经写了 *.db，但 tasks.db 已经被 Git 跟踪，所以后续每次运行任务都会导致 Git 显示数据库文件被修改。
+
+   影响：Git 状态容易变脏，队友之间提交会混乱。
+
+   建议：
+
+   git rm --cached backend/tasks.db
+
+   然后提交一次，让数据库文件只保留在本地，不再进入 Git 仓库。
+
+
+7. 后端数据库结构过于简单。
+
+   当前只建了 tasks 表：
+
+   task_id
+   status
+   data
+
+   所有内容都塞进 data JSON 字符串。
+
+   影响：
+   1. 不方便查询 Agent 步骤。
+   2. 不方便统计指标。
+   3. 不方便展示测试用例。
+   4. 不方便做历史任务筛选和报告分析。
+
+   建议至少增加：
+
+   tasks 表：任务基础信息
+   agent_steps 表：每个 Agent 的输入、输出、状态、耗时
+   test_cases 表：测试用例、执行结果、是否通过
+   execution_logs 表：运行日志、错误日志、修复记录
+
+
+8. 后端任务接口是同步执行，不是真正的异步任务轮询。
+
+   当前 POST /api/tasks/text 会直接执行完整 solve_problem，完成后才返回 completed。
+
+   影响：
+   1. 如果模型调用较慢，前端会一直等待。
+   2. 前端的轮询逻辑意义不大。
+   3. 超时风险较高。
+
+   建议：
+   1. 创建任务后立即返回 task_id 和 running。
+   2. 后台线程或任务队列执行 Agent 流程。
+   3. 前端通过 GET /api/tasks/{task_id} 查询状态。
+
+
+9. 后端返回字段和前端期望字段不完全一致。
+
+   前端页面会使用这些字段：
+
+   total_ms
+   api_call
+   fallback_used
+   code_length
+   notes
+   created_at
+   execution_report.exit_code
+   execution_report.stdout
+   execution_report.stderr
+
+   当前后端只稳定返回：
+
+   task_id
+   status
+   problem
+   solution_markdown
+   code
+   execution_report
+
+   建议：后端统一补齐字段，即使没有数据也返回默认值，避免前端展示异常。
+
+
+10. 任务历史接口缺少排序和创建时间。
+
+   当前 GET /api/tasks 返回任务列表，但没有稳定的 created_at 字段，也没有按时间倒序。
+
+   影响：历史记录页展示不完整。
+
+   建议：任务创建时保存 created_at、updated_at，并按 created_at 倒序返回。
+
+
+三、建议修改的问题
+
+1. 前端接口地址写死为 http://127.0.0.1:8000。
+
+   文件：frontend/src/api/task.js
+
+   影响：本地运行可以，但部署到服务器或 Docker 环境时不灵活。
+
+   建议：改成环境变量，例如：
+
+   VITE_API_BASE_URL=http://127.0.0.1:8000
+
+
+2. README 需要更新后端运行方式。
+
+   当前项目已经从单文件 Streamlit 扩展到 Vue3 + FastAPI，但 README 如果仍偏向原 Streamlit 运行方式，会让新同学不知道怎么启动完整项目。
+
+   建议 README 写清楚：
+
+   1. 后端启动方式
+   2. 前端启动方式
+   3. API Key 配置方式
+   4. Docker 启动方式
+   5. 当前已完成和未完成接口
+
+
+3. .env.example 缺失。
+
+   当前后端读取 DASHSCOPE_API_KEY，但仓库没有清晰的 .env.example。
+
+   建议新增：
+
+   DASHSCOPE_API_KEY=你的阿里云百炼API Key
+   API_BASE_URL=
+   MODEL_NAME=
+
+
+4. API Key 未配置时会使用兜底输出。
+
+   当前系统没有 API Key 时不会崩溃，能返回兜底代码，这是优点。
+
+   但建议在返回结果里明确标记：
+
+   api_call = false
+   fallback_used = true
+   fallback_reason = API Key 未配置或模型调用失败
+
+   这样答辩时更容易解释系统稳定性。
+
+
+5. Agent 步骤没有从 ai_coding_agent_bailian.py 传递到后端。
+
+   当前单文件 Agent 内部有 5 个 Agent 流程，但后端只取最终结果，没有把中间步骤保存给前端。
+
+   建议 solve_problem 返回结构中增加 agent_steps 字段，后端保存并通过 /api/tasks/{task_id}/steps 返回。
+
+
+6. 测试生成 Agent 的结果没有单独结构化返回。
+
+   当前测试用例可能只存在于文本报告或代码里。
+
+   建议单独返回 tests 字段，便于前端展示和后端统计通过率。
+
+
+7. 调试修复 Agent 的修复轮次没有结构化记录。
+
+   建议记录：
+
+   repair_round
+   error_message
+   old_code_summary
+   new_code_summary
+   repair_success
+
+
+8. RAG 命中的算法模板没有结构化展示。
+
+   建议在任务结果中增加：
+
+   rag_hits
+   template_name
+   score
+   template_content_summary
+
+   这样可以证明项目不是普通调用大模型，而是有 RAG 能力。
+
+
+9. 后端异常返回格式需要统一。
+
+   当前部分接口失败时返回 code = 1，部分未实现接口由 FastAPI 默认返回 404。
+
+   建议所有业务接口统一返回：
+
+   code
+   message
+   data
+   request_id
+
+
+10. 前端对未实现接口的错误提示可以更友好。
+
+   例如 Agent 步骤接口 404 时，前端可以显示：
+
+   当前后端暂未返回 Agent 步骤数据。
+
+   而不是只弹出请求失败。
+
+
+四、建议优先级
+
+第一优先级：必须先修，否则演示会明显失败
+
+1. 补齐 requirements.txt 的 fastapi、uvicorn、python-dotenv。
+2. 实现 GET /api/tasks/{task_id}/steps。
+3. 实现 POST /api/tasks/image，或者前端暂时隐藏图片上传入口。
+4. 实现 GET /api/metrics/summary，或者前端暂时隐藏指标看板。
+5. 修复 Docker 后端构建配置。
+6. 让 benchmark_data.json 和 sandbox/evaluator.py 不再是空文件。
+
+
+第二优先级：影响项目完整度和答辩说服力
+
+1. 实现 GET /api/tasks/{task_id}/tests。
+2. 实现 POST /api/tasks/{task_id}/rerun。
+3. 保存 Agent 步骤、测试结果、RAG 命中、修复轮次。
+4. 数据库从单表 JSON 升级为多表结构。
+5. README、接口文档、.env.example 同步更新。
+
+
+第三优先级：工程优化和加分项
+
+1. 后端任务改成真正异步执行。
+2. 前端 API 地址改成环境变量。
+3. 增加统一异常处理和请求日志。
+4. 增加 Benchmark 评测报告导出。
+5. 增加 Docker Compose 一键部署验证。
+
+
+五、建议给后端队友的最小修改目标
+
+后端队友至少需要保证以下接口可用：
+
+1. GET /api/health
+2. POST /api/tasks/text
+3. POST /api/tasks/image
+4. GET /api/tasks
+5. GET /api/tasks/{task_id}
+6. GET /api/tasks/{task_id}/report
+7. GET /api/tasks/{task_id}/steps
+8. GET /api/tasks/{task_id}/tests
+9. POST /api/tasks/{task_id}/rerun
+10. GET /api/metrics/summary
+
+
+六、建议验收方式
+
+1. 启动后端。
+   访问 http://127.0.0.1:8000/api/health，返回 status = ok。
+
+2. 启动前端。
+   访问 http://127.0.0.1:5173，页面正常打开。
+
+3. 提交一条文本题目。
+   页面能展示题意、解题思路、代码、执行结果、报告。
+
+4. 查看 Agent 执行链路。
+   页面能看到 5 个 Agent 步骤。
+
+5. 查看测试用例。
+   页面能看到生成的测试用例和通过情况。
+
+6. 上传一张题目截图。
+   后端能接收图片，前端不报错。
+
+7. 点击重新执行。
+   任务可以重新跑一次并刷新结果。
+
+8. 打开历史记录页。
+   能看到历史任务，刷新页面后任务不丢失。
+
+9. 打开指标看板。
+   能看到任务总数、成功率、平均耗时、测试通过率。
+
+10. Docker 启动。
+    使用 docker compose up --build 后，前端和后端都能访问。
+
+
+七、当前版本一句话结论
+
+当前版本已经具备“文本题目提交和生成结果”的基础能力，但还没有完成“前后端完整对接、Agent 步骤展示、图片上传、自动评测、指标看板、Docker 一键部署”这些第一阶段关键能力。建议先补齐接口和依赖，再做演示和答辩材料。

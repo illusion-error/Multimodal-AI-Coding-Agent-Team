@@ -1,3 +1,14 @@
+import io
+
+from PIL import Image
+
+
+def make_png() -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", (8, 8), color=(255, 255, 255)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def test_image_validation_and_workflow(client):
     invalid = client.post(
         "/api/tasks/image",
@@ -11,9 +22,22 @@ def test_image_validation_and_workflow(client):
     )
     assert empty.status_code == 400
 
-    created = client.post(
+    disguised = client.post(
         "/api/tasks/image",
         files={"image": ("problem.png", b"not-a-real-image", "image/png")},
+        data={"supplement": "two sum: nums and target"},
+    )
+    assert disguised.status_code == 400
+
+    missing_key_and_text = client.post(
+        "/api/tasks/image",
+        files={"image": ("problem.png", make_png(), "image/png")},
+    )
+    assert missing_key_and_text.status_code == 400
+
+    created = client.post(
+        "/api/tasks/image",
+        files={"image": ("problem.png", make_png(), "image/png")},
         data={"supplement": "two sum: nums and target"},
     )
     assert created.status_code == 200
@@ -21,4 +45,6 @@ def test_image_validation_and_workflow(client):
     detail = client.get(f"/api/tasks/{task_id}").json()["data"]
     assert detail["status"] == "completed"
     assert detail["input_type"] == "image"
+    assert detail["image_format"] == "PNG"
+    assert detail["image_width"] == 8
     assert len(client.get(f"/api/tasks/{task_id}/steps").json()["data"]) == 5

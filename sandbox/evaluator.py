@@ -116,11 +116,15 @@ def run_auto_tests(
         report["total_time_ms"] += execution["duration_ms"]
         report["details"].append(
             {
+                "name": case.get("name", f"用例 {index}"),
                 "input": case.get("input", case.get("args", [])),
+                "args": args,
+                "kwargs": kwargs,
                 "expected": payload.get("expected", repr(expected)),
                 "actual": payload.get("actual", ""),
                 "passed": passed,
                 "category": case.get("category", "normal"),
+                "purpose": case.get("purpose", ""),
                 "duration_ms": execution["duration_ms"],
                 "error": payload.get("error", ""),
                 "status": execution["status"],
