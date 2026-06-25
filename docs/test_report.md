@@ -56,12 +56,39 @@ VITE_ENABLE_STAGE2=true   构建通过
 
 ## Docker
 
-`docker compose config` 已通过。
+本机 Docker Compose 完整验收已通过：
 
-本机 WSL、VirtualMachinePlatform 和固件虚拟化均已启用，但 Windows
-存在 `CBSRebootPending` 和待处理文件重命名，WSL 2 引擎要求完成系统重启。
-因此当前无法在本机执行真实镜像构建。`docker compose config` 已通过；
-GitHub Actions 配置了 `docker compose build`，由 CI 完成真实容器构建验收。
+```text
+docker compose config：通过
+后端镜像构建：通过
+前端镜像构建：通过
+后端容器：healthy
+前端容器：healthy
+前端端口 5173：HTTP 200
+后端端口 8000：health=ok
+```
+
+通过容器映射端口提交两数之和任务：
+
+```text
+任务状态：completed
+Agent：5/5
+语义契约：two_sum_indices
+测试：4/4
+退出码：0
+Markdown 报告：HTTP 200
+指标成功率：100%
+```
+
+执行 `docker compose down` 删除容器后重新 `up`，原任务仍可查询，证明
+`outputs_backend_data` 命名卷中的 SQLite 数据持久化正常。
+
+GitHub Actions 已增加 `docker compose up --wait`、后端健康接口和前端
+HTTP 检查，后续每次提交都会验证“构建 + 启动 + 健康”，不再只验证镜像构建。
+
+## 第一阶段最终结论
+
+第一阶段验收表全部通过，可以作为正式稳定版本进入第二阶段开发。
 
 ## 本地端到端联调
 

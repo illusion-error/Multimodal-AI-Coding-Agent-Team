@@ -42,3 +42,13 @@ jobs:
 
       - name: Build containers
         run: docker compose build
+
+      - name: Start containers and verify health
+        run: |
+          docker compose up -d --wait --wait-timeout 180
+          curl --fail http://127.0.0.1:8000/api/health
+          curl --fail http://127.0.0.1:5173/
+
+      - name: Stop containers
+        if: always()
+        run: docker compose down -v
