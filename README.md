@@ -1,162 +1,185 @@
 # Multimodal AI Coding Agent Team
 
-多模态代码生成 Agent 项目。系统支持输入编程题文本或上传题目截图，调用阿里云百炼大模型完成题意识别、解题思路生成、Python 代码生成、本地执行测试，并输出项目报告。
+多模态代码生成 Agent 工程。系统支持文本题目和题目截图，使用阿里云百炼模型完成题意识别、RAG 检索、解题规划、测试生成、代码生成、执行调试和报告输出。
 
-当前仓库版本是基于原版 `ai_coding_agent_o3.py` 改造的百炼版，不再强制依赖 OpenAI、Gemini 和 E2B 三个 API Key。
+## 核心能力
 
-## 功能特点
+- 5 个 Agent：题目识别、解题规划、测试生成、代码生成、执行调试。
+- 轻量 RAG：生成代码前检索算法模板。
+- 失败修复：执行失败后最多自动修复 3 轮。
+- Vue 3 前端、FastAPI 后端和 SQLite 历史记录。
+- 文本及图片任务、状态轮询、Agent Timeline、测试记录和报告下载。
+- 统一受限执行器与自动评测器。
+- 5 道真实 Benchmark 跑批及结果持久化。
+- Docker Compose 部署和 GitHub Actions 自动测试。
+- 无 API Key 时使用离线兜底，仍能完整演示流程。
 
-- 支持文本编程题输入。
-- 支持题目截图上传，并通过百炼视觉模型识别题意。
-- 使用阿里云百炼 OpenAI 兼容接口调用大模型。
-- 自动生成题意理解、解题思路、复杂度分析和 Python 代码。
-- 自动提取 Python 代码块并在本地执行。
-- 支持执行超时控制和危险调用检测。
-- 支持 API 失败兜底输出，避免页面空白。
-- 支持下载 Python 解法文件、项目报告和完整 JSON 结果。
-
-## 项目文件
-
-```text
-Multimodal-AI-Coding-Agent-Team/
-  ai_coding_agent_bailian.py        # 项目主程序，Streamlit 单文件可运行版
-  requirements.txt                  # Python 依赖
-  README.md                         # 项目说明
-  多模态代码生成Agent项目升级功能文档.docx
-  多模态代码生成Agent项目精简升级方案与分工.docx
-```
-
-## 如何运行
-
-请按照以下步骤设置并运行应用程序。
-
-### 1. 克隆仓库
-
-```bash
-git clone https://github.com/illusion-error/Multimodal-AI-Coding-Agent-Team.git
-cd Multimodal-AI-Coding-Agent-Team
-```
-
-### 2. 安装依赖
-
-```bash
-pip install -r requirements.txt
-```
-
-如果只运行当前百炼版主程序，核心依赖是 `streamlit`。仓库中的 `requirements.txt` 可能包含原版项目依赖，保留它们不影响运行。
-
-### 3. 获取阿里云百炼 API Key
-
-前往阿里云百炼控制台创建 API Key：
-
-https://help.aliyun.com/zh/model-studio/get-api-key
-
-当前项目使用的环境变量名：
+## 项目结构
 
 ```text
-DASHSCOPE_API_KEY
+.
+├── ai_coding_agent_bailian.py   # 唯一 Agent/RAG 业务实现
+├── backend/
+│   ├── main.py                  # FastAPI 接口
+│   ├── database.py              # SQLite 数据访问
+│   ├── requirements.txt
+│   └── Dockerfile
+├── frontend/                    # Vue 3 + Element Plus
+├── sandbox/
+│   ├── code_runner.py           # 第一阶段受限子进程执行器
+│   ├── evaluator.py             # 结构化测试评测
+│   └── benchmark_runner.py      # 真实 Benchmark 跑批
+├── tests/                       # pytest 自动化测试
+├── benchmark_data.json
+├── docker-compose.yml
+└── .env.example
 ```
 
-### 4. 配置 API Key
+## 环境要求
 
-方式一：在 Streamlit 页面侧边栏直接输入 API Key。
+- Python 3.10+
+- Node.js 20+
+- Docker Desktop，可选
 
-方式二：在终端中设置环境变量。
+## 配置
 
-Windows PowerShell：
+复制环境模板：
 
 ```powershell
-$env:DASHSCOPE_API_KEY="你的阿里云百炼APIKey"
+Copy-Item .env.example .env
 ```
 
-macOS / Linux：
+在本地 `.env` 中填写：
 
-```bash
-export DASHSCOPE_API_KEY="你的阿里云百炼APIKey"
+```text
+DASHSCOPE_API_KEY=你的百炼APIKey
 ```
 
-### 5. 运行 Streamlit 应用
+不要提交 `.env`。没有 API Key 时系统会自动使用离线兜底。
 
-```bash
+## 本地运行
+
+### 后端
+
+```powershell
+python -m pip install -r backend/requirements.txt
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+```
+
+接口文档：
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+### 前端
+
+```powershell
+cd frontend
+npm ci
+$env:VITE_API_BASE_URL="http://127.0.0.1:8000"
+$env:VITE_ENABLE_STAGE2="false"
+npm run dev
+```
+
+页面地址：
+
+```text
+http://127.0.0.1:5173
+```
+
+### Streamlit 单文件版
+
+```powershell
+python -m pip install -r requirements.txt
 streamlit run ai_coding_agent_bailian.py
 ```
 
-启动后，浏览器会打开本地页面。一般地址类似：
+## 第一阶段接口
 
 ```text
-http://localhost:8501
+GET  /api/health
+POST /api/tasks/text
+POST /api/tasks/image
+GET  /api/tasks
+GET  /api/tasks/{id}
+GET  /api/tasks/{id}/steps
+GET  /api/tasks/{id}/tests
+GET  /api/tasks/{id}/repairs
+GET  /api/tasks/{id}/report
+POST /api/tasks/{id}/rerun
+GET  /api/metrics/summary
 ```
 
-## 默认模型配置
-
-默认接口地址：
+第二阶段已提供 Benchmark 数据接口：
 
 ```text
-https://dashscope.aliyuncs.com/compatible-mode/v1
+GET /api/benchmark/results
 ```
 
-默认模型：
+Prompt 版本和 Trace 后端尚未启用，因此第一阶段默认设置：
 
 ```text
-文本模型：qwen-plus
-视觉模型：qwen3-vl-plus
+VITE_ENABLE_STAGE2=false
 ```
 
-这些配置可以在页面侧边栏中修改。
+## Benchmark
 
-## 使用方式
+执行真实题库跑批：
 
-1. 在页面左侧输入编程题文本，或上传编程题截图。
-2. 如果上传截图，可以额外输入补充说明。
-3. 点击“生成解法、执行代码并生成文档”。
-4. 在页面中查看题意识别、解题说明、Python 代码和执行结果。
-5. 在“下载”页签中下载 Python 解法、项目报告或完整 JSON 结果。
-
-## 兜底机制
-
-如果出现以下情况，系统会自动启用兜底输出：
-
-- 未填写 API Key。
-- API Key 欠费或无权限。
-- 网络请求失败。
-- 模型没有返回可提取的 Python 代码。
-- 图片识别失败。
-
-兜底模式下，页面仍会生成示例代码、执行结果和项目报告，方便课程答辩演示。
-
-## 与原版项目的区别
-
-原版项目需要：
-
-- OpenAI API Key
-- Google Gemini API Key
-- E2B API Key
-
-当前百炼版改为：
-
-- 只需要阿里云百炼 API Key。
-- 不强制使用 E2B，代码在本地临时环境中执行。
-- 不强制使用 OpenAI SDK，接口调用使用百炼 OpenAI 兼容模式。
-- 增加 API 失败兜底输出，保证页面始终有结果。
-
-## 命令行测试
-
-也可以不用打开页面，直接用命令行测试：
-
-```bash
-python ai_coding_agent_bailian.py --cli "两数之和：给定 nums 和 target，返回两个数的下标。"
+```powershell
+python -m sandbox.benchmark_runner
 ```
 
-如果没有配置 API Key，命令行会自动进入兜底模式，并输出可运行代码和执行结果。
+只运行、不写入数据库：
 
-## 后续升级方向
+```powershell
+python -m sandbox.benchmark_runner --no-persist
+```
 
-后续可以继续升级为完整工程化项目：
+跑批会逐题调用 Agent、逐用例执行代码，并将摘要和明细写入统一 SQLite 数据库。
 
-- Vue3 前端页面。
-- FastAPI / Flask 后端接口。
-- SQLite / MySQL 历史任务存储。
-- Agent 工作流拆分。
-- RAG 算法模板库。
-- 自动测试和失败修复闭环。
-- Docker Compose 一键部署。
+## 自动测试
+
+```powershell
+python -m pip install -r requirements-dev.txt
+pytest
+```
+
+前端构建：
+
+```powershell
+cd frontend
+npm ci
+npm run build
+```
+
+## Docker Compose
+
+```powershell
+docker compose config
+docker compose build
+docker compose up -d
+docker compose ps
+```
+
+访问：
+
+```text
+前端：http://127.0.0.1:5173
+后端：http://127.0.0.1:8000
+```
+
+停止：
+
+```powershell
+docker compose down
+```
+
+SQLite 数据通过 `backend_data` 卷持久化。
+
+## 安全说明
+
+第一阶段执行器使用 AST 检查、临时目录、隔离模式 Python、最小环境变量、超时和输出限制。它适合课程项目和受控算法代码，但不等同于操作系统级安全边界。
+
+第二阶段面向不可信代码时，应切换到 Docker Sandbox 或 E2B，并限制网络、CPU、内存、进程数和文件系统权限。

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import traceback
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -50,7 +51,16 @@ def _allowed_origins() -> list[str]:
     return [origin.strip() for origin in value.split(",") if origin.strip()]
 
 
-app = FastAPI(title="AI Coding Agent API", version=APP_VERSION)
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    init_db()
+    print("AI Coding Agent API started")
+    print(f"Agent module loaded: {AGENT_AVAILABLE}")
+    print(f"Database path: {os.getenv('DATABASE_PATH', 'backend/data/tasks.db')}")
+    yield
+
+
+app = FastAPI(title="AI Coding Agent API", version=APP_VERSION, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins(),
@@ -373,14 +383,6 @@ async def get_metrics_summary() -> dict:
 @app.get("/api/benchmark/results")
 async def get_benchmark_results() -> dict:
     return api_response(get_latest_benchmark_results())
-
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    init_db()
-    print("AI Coding Agent API started")
-    print(f"Agent module loaded: {AGENT_AVAILABLE}")
-    print(f"Database path: {os.getenv('DATABASE_PATH', 'backend/data/tasks.db')}")
 
 
 if __name__ == "__main__":

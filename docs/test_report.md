@@ -1,36 +1,74 @@
-# 多模态 Agent 项目真实测试报告 (成员 D 记录)
+# 多模态代码生成 Agent 测试报告
 
-**测试环境**：Windows 11 / Python 3.10 / SQLite / 本地沙盒
-**测试日期**：2026-06-24
+测试日期：2026-06-25
+测试环境：Windows 11、Python 3.14、本地 SQLite、Node.js/Vite
 
-## 1. 沙盒安全与隔离测试 (Sandbox Tests)
-| 测试用例 | 注入代码 | 期望行为 | 实际沙盒输出 | 结论 |
-| :--- | :--- | :--- | :--- | :--- |
-| **目录逃逸测试** | `open('../.git/config').read()` | 静态拦截或执行报错 | 触发关键词拦截: 包含禁用字 `open` | ✅ 成功隔离 |
-| **内存死循环测试** | `while True: pass` | 5秒后触发 Timeout | `执行超时（>5秒），已强制中断！` | ✅ 成功熔断 |
-| **越权执行测试** | `import os; os.system('dir')` | 静态拦截 | 触发关键词拦截: 包含禁用字 `os.system` | ✅ 成功拦截 |
+## 自动化测试
 
-## 2. API 接口连通性测试 (API Tests)
-| 接口路由 | 测试方法 | 参数/数据 | 实际返回状态码 | 连通性 |
-| :--- | :--- | :--- | :--- | :--- |
-| `GET /api/health` | Postman | 无 | HTTP 200 (status: ok) | ✅ 正常 |
-| `POST /api/tasks/text` | 前端联调 | problem_text="两数之和" | HTTP 200 (返回 task_id) | ✅ 正常 |
-| `POST /api/tasks/image` | 接口测试 | image_bytes | HTTP 405 (Method Not Allowed) | ❌ 待后端 B 补齐 |
+执行命令：
 
-# 多模态代码生成 Agent 第一阶段真实测试报告
+```text
+pytest
+```
 
-**测试时间**：2026-06-25
-**测试负责人**：成员 D (测试与部署)
-**测试环境**：Windows 11 / Python 3.13 / 本地受限沙盒
+结果：
 
-## 1. 沙盒安全与隔离测试 (Sandbox Security)
-| 注入代码 | 期望行为 | 实际沙盒输出 | 结论 |
-| :--- | :--- | :--- | :--- |
-| `print(open('../.git/config').read())` | AST 算法检测并拦截 | 禁用内置函数调用: open | ✅ 成功拦截 |
-| `import os; os.system('dir')` | AST 算法检测并拦截 | 禁用导入模块: os | ✅ 成功拦截 |
-| `while True: pass` | 5秒后强行熔断 | 执行超时（>5秒），已强制中断！ | ✅ 成功熔断 |
+```text
+7 passed
+```
 
-## 2. 自动化 Benchmark 评测机测试 (Benchmark Results)
-| 题库文件 | 加载题数 | 评测执行方式 | 数据库指标写入状态 | 结论 |
-| :--- | :--- | :--- | :--- | :--- |
-| `benchmark_data.json` | 5 道算法题 | 真实读取、逐题拼接运行、汇总计算 | 成功向 `backend/tasks.db` 写入两项真实指标 | ✅ 通过 |
+覆盖范围：
+
+| 模块 | 验证内容 | 结果 |
+| --- | --- | --- |
+| Agent 契约 | 5 个 Agent、RAG、测试用例、执行报告、离线兜底 | 通过 |
+| 数据库 | 更新任务后步骤、测试和修复日志不丢失 | 通过 |
+| 文本 API | 创建、轮询、详情、步骤、测试、报告、重跑、指标 | 通过 |
+| 图片 API | 格式校验、空文件、图片任务和 5 Agent 流程 | 通过 |
+| Runner | 正常执行、超时、危险文件访问拦截 | 通过 |
+| Evaluator | 真实通过用例和失败用例统计 | 通过 |
+| Benchmark | 5 道题真实执行并写入统一数据库 | 通过 |
+
+## Benchmark
+
+离线兜底环境下真实运行 5 道题：
+
+```text
+总题目：5
+通过题目：5
+通过率：100%
+```
+
+结果由 Agent 生成代码后交给 Evaluator 执行，不再使用固定通过率或固定耗时。
+
+## 前端构建
+
+第一阶段与第二阶段开关均完成构建验证：
+
+```text
+VITE_ENABLE_STAGE2=false  构建通过
+VITE_ENABLE_STAGE2=true   构建通过
+```
+
+## Docker
+
+`docker compose config` 已通过。
+
+本机 Docker Desktop 的 WSL 2 引擎仍要求完成系统重启，当前无法在本次测试中执行真实镜像构建。GitHub Actions 已配置 `docker compose build`，用于在 CI 环境继续验证容器构建。
+
+## 本地端到端联调
+
+使用真实 Uvicorn 和 Vite 进程完成 HTTP 验证：
+
+```text
+后端健康状态：ok
+任务状态：completed
+Agent 步骤：5
+测试用例：3
+Markdown 报告：HTTP 200
+前端页面：HTTP 200
+```
+
+## 安全边界
+
+第一阶段 Runner 是受限子进程，不宣称为操作系统级沙盒。已经实现 AST 检查、隔离模式 Python、最小环境、临时目录、超时和输出限制。第二阶段仍需 Docker/E2B 实现强隔离。
