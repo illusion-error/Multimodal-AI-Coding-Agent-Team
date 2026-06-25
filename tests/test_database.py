@@ -33,6 +33,11 @@ def test_task_update_preserves_child_records():
                 "expected": "3",
                 "actual": "3",
                 "passed": True,
+                "source": "system_authoritative",
+                "trusted": True,
+                "validation_status": "verified",
+                "contract_id": "addition",
+                "contract_fingerprint": "abc123",
             }
         ],
         repairs=[{"round": 1, "status": "passed", "reason": "fixed"}],
@@ -48,7 +53,11 @@ def test_task_update_preserves_child_records():
     )
 
     assert len(get_steps_by_task("task-1")) == 5
-    assert len(get_tests_by_task("task-1")) == 1
+    stored_tests = get_tests_by_task("task-1")
+    assert len(stored_tests) == 1
+    assert stored_tests[0]["source"] == "system_authoritative"
+    assert stored_tests[0]["trusted"] is True
+    assert stored_tests[0]["contract_id"] == "addition"
     assert len(get_execution_logs_by_task("task-1")) == 1
     assert get_task_by_id("task-1")["created_at"] == original_created_at
     assert calc_metrics()["test_pass_rate"] == 100

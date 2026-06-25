@@ -37,6 +37,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -144,11 +145,49 @@ def looks_like_corrupted_text(text: str) -> bool:
     return question_marks >= 4 and question_marks / max(visible_chars, 1) >= 0.12
 
 
+def _build_problem_contract(
+    *,
+    contract_id: str,
+    title: str,
+    signature: str,
+    input_description: str,
+    output_description: str,
+    rules: List[str],
+    argument_count: Optional[int],
+    return_type: str,
+    verification_mode: str = "authoritative",
+) -> Dict[str, Any]:
+    """Create an immutable semantic contract shared by all five Agents."""
+
+    contract: Dict[str, Any] = {
+        "id": contract_id,
+        "title": title,
+        "signature": signature,
+        "input": input_description,
+        "output": output_description,
+        "rules": list(rules),
+        "argument_count": argument_count,
+        "return_type": return_type,
+        "verification_mode": verification_mode,
+    }
+    fingerprint_source = json.dumps(
+        contract,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    contract["fingerprint"] = hashlib.sha256(
+        fingerprint_source.encode("utf-8")
+    ).hexdigest()[:16]
+    return contract
+
+
 def infer_problem_contract(problem: str) -> Dict[str, Any]:
     """Infer a non-negotiable input/output contract from the recognized problem."""
 
     text = str(problem or "")
     lower = text.lower()
+    compact_lower = re.sub(r"[\s,，.!！。:_\-]+", "", lower)
     is_two_sum = (
         "two sum" in lower
         or "两数之和" in text
@@ -160,45 +199,98 @@ def infer_problem_contract(problem: str) -> Dict[str, Any]:
     ) or any(keyword in text for keyword in ("下标", "索引"))
 
     if is_two_sum and asks_for_indices:
-        return {
-            "id": "two_sum_indices",
-            "title": "两数之和：返回下标",
-            "signature": "solution(nums: list[int], target: int) -> list[int]",
-            "input": "整数数组 nums 和整数 target",
-            "output": "返回两个不同元素的下标 [i, j]；无解返回 []",
-            "rules": [
+        return _build_problem_contract(
+            contract_id="two_sum_indices",
+            title="两数之和：返回下标",
+            signature="solution(nums: list[int], target: int) -> list[int]",
+            input_description="整数数组 nums 和整数 target",
+            output_description="返回两个不同元素的下标 [i, j]；无解返回 []",
+            rules=[
                 "返回值必须是下标列表，不得返回 True/False。",
                 "不得返回元素值本身。",
                 "必须满足 i != j 且 nums[i] + nums[j] == target。",
                 "期望时间复杂度 O(n)。",
             ],
-        }
+            argument_count=2,
+            return_type="list",
+        )
+    if "helloworld" in compact_lower or "你好世界" in text:
+        return _build_problem_contract(
+            contract_id="hello_world",
+            title="Hello World 脚本",
+            signature="solution() -> str",
+            input_description="无参数",
+            output_description='返回字符串 "Hello, World!"',
+            rules=[
+                '返回值必须严格等于 "Hello, World!"。',
+                "solution 不接收任何参数。",
+                "脚本直接运行时应输出同一文本。",
+            ],
+            argument_count=0,
+            return_type="str",
+        )
     if "palindrome" in lower or "回文" in text:
-        return {
-            "id": "palindrome",
-            "title": "回文判断",
-            "signature": "solution(text: str) -> bool",
-            "input": "字符串 text",
-            "output": "返回布尔值，表示忽略大小写和非字母数字字符后是否回文",
-            "rules": ["空字符串视为回文。"],
-        }
+        return _build_problem_contract(
+            contract_id="palindrome",
+            title="回文判断",
+            signature="solution(text: str) -> bool",
+            input_description="字符串 text",
+            output_description="返回布尔值，表示忽略大小写和非字母数字字符后是否回文",
+            rules=["空字符串视为回文。"],
+            argument_count=1,
+            return_type="bool",
+        )
     if "fibonacci" in lower or "斐波那契" in text:
-        return {
-            "id": "fibonacci",
-            "title": "斐波那契数",
-            "signature": "solution(n: int) -> int",
-            "input": "非负整数 n",
-            "output": "返回第 n 个斐波那契数",
-            "rules": ["F(0)=0，F(1)=1。"],
-        }
-    return {
-        "id": "generic",
-        "title": "通用编程题",
-        "signature": "solution(*args)",
-        "input": "以题目原文为准",
-        "output": "严格保持题目要求的返回类型和语义",
-        "rules": ["不得擅自把返回下标、返回值等要求改成布尔判断。"],
-    }
+        return _build_problem_contract(
+            contract_id="fibonacci",
+            title="斐波那契数",
+            signature="solution(n: int) -> int",
+            input_description="非负整数 n",
+            output_description="返回第 n 个斐波那契数",
+            rules=["F(0)=0，F(1)=1。"],
+            argument_count=1,
+            return_type="int",
+        )
+    if "最大值" in text or "maximum" in lower or "max value" in lower:
+        return _build_problem_contract(
+            contract_id="maximum",
+            title="数组最大值",
+            signature="solution(values: list[int]) -> int",
+            input_description="非空整数数组 values",
+            output_description="返回数组中的最大整数",
+            rules=["必须正确处理全负数和单元素数组。"],
+            argument_count=1,
+            return_type="int",
+        )
+    if (
+        "反转字符串" in text
+        or "reverse string" in lower
+        or ("反转" in text and "字符串" in text)
+    ):
+        return _build_problem_contract(
+            contract_id="reverse_string",
+            title="反转字符串",
+            signature="solution(text: str) -> str",
+            input_description="字符串 text",
+            output_description="返回字符顺序完全反转后的字符串",
+            rules=["空字符串返回空字符串；不得改变字符本身。"],
+            argument_count=1,
+            return_type="str",
+        )
+    return _build_problem_contract(
+        contract_id="generic",
+        title="通用编程题",
+        signature="solution(*args)",
+        input_description="以题目原文为准",
+        output_description="严格保持题目要求的返回类型和语义",
+        rules=[
+            "不得擅自改变题目要求的输入、输出类型和返回语义。",
+            "没有系统权威用例时，模型测试只能作为建议，不得驱动自动修复。",
+        ],
+        argument_count=None,
+        return_type="unknown",
+        verification_mode="manual_review",
+    )
 
 
 def format_problem_contract(contract: Dict[str, Any]) -> str:
@@ -208,8 +300,36 @@ def format_problem_contract(contract: Dict[str, Any]) -> str:
         f"函数签名：{contract.get('signature', 'solution(*args)')}\n"
         f"输入：{contract.get('input', '')}\n"
         f"输出：{contract.get('output', '')}\n"
+        f"验证模式：{contract.get('verification_mode', 'manual_review')}\n"
+        f"语义指纹：{contract.get('fingerprint', '')}\n"
         f"不可变规则：\n{rules or '- 严格遵守题目原文'}"
     )
+
+
+def _authoritative_case(
+    contract: Dict[str, Any],
+    *,
+    name: str,
+    args: List[Any],
+    input_text: str,
+    expected: Any,
+    category: str,
+    purpose: str,
+) -> Dict[str, Any]:
+    return {
+        "name": name,
+        "args": args,
+        "kwargs": {},
+        "input": input_text,
+        "expected": expected,
+        "category": category,
+        "purpose": purpose,
+        "source": "system_authoritative",
+        "trusted": True,
+        "validation_status": "verified",
+        "contract_id": contract.get("id", ""),
+        "contract_fingerprint": contract.get("fingerprint", ""),
+    }
 
 
 def authoritative_test_cases(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -217,50 +337,46 @@ def authoritative_test_cases(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     if contract.get("id") == "two_sum_indices":
         return [
-            {
-                "name": "基础样例",
-                "args": [[2, 7, 11, 15], 9],
-                "input": "nums=[2,7,11,15], target=9",
-                "expected": [0, 1],
-                "category": "basic",
-                "purpose": "验证返回两个下标而不是布尔值",
-            },
-            {
-                "name": "非相邻答案",
-                "args": [[3, 2, 4], 6],
-                "input": "nums=[3,2,4], target=6",
-                "expected": [1, 2],
-                "category": "normal",
-                "purpose": "验证哈希表查找",
-            },
-            {
-                "name": "重复元素",
-                "args": [[3, 3], 6],
-                "input": "nums=[3,3], target=6",
-                "expected": [0, 1],
-                "category": "edge",
-                "purpose": "验证不能重复使用同一元素",
-            },
-            {
-                "name": "无解情况",
-                "args": [[1, 2, 3], 7],
-                "input": "nums=[1,2,3], target=7",
-                "expected": [],
-                "category": "edge",
-                "purpose": "验证无解返回空列表",
-            },
+            _authoritative_case(contract, name="基础样例", args=[[2, 7, 11, 15], 9], input_text="nums=[2,7,11,15], target=9", expected=[0, 1], category="basic", purpose="验证返回两个下标而不是布尔值"),
+            _authoritative_case(contract, name="非相邻答案", args=[[3, 2, 4], 6], input_text="nums=[3,2,4], target=6", expected=[1, 2], category="normal", purpose="验证哈希表查找"),
+            _authoritative_case(contract, name="重复元素", args=[[3, 3], 6], input_text="nums=[3,3], target=6", expected=[0, 1], category="edge", purpose="验证不能重复使用同一元素"),
+            _authoritative_case(contract, name="无解情况", args=[[1, 2, 3], 7], input_text="nums=[1,2,3], target=7", expected=[], category="edge", purpose="验证无解返回空列表"),
+        ]
+    if contract.get("id") == "hello_world":
+        return [
+            _authoritative_case(
+                contract,
+                name="标准输出",
+                args=[],
+                input_text="无参数",
+                expected="Hello, World!",
+                category="basic",
+                purpose="验证返回文本严格符合题意，防止兜底提示污染期望值",
+            )
         ]
     if contract.get("id") == "palindrome":
         return [
-            {"name": "标准回文", "args": ["A man, a plan, a canal: Panama"], "input": "A man, a plan, a canal: Panama", "expected": True, "category": "basic"},
-            {"name": "非回文", "args": ["race a car"], "input": "race a car", "expected": False, "category": "normal"},
-            {"name": "空字符串", "args": [""], "input": "", "expected": True, "category": "edge"},
+            _authoritative_case(contract, name="标准回文", args=["A man, a plan, a canal: Panama"], input_text="A man, a plan, a canal: Panama", expected=True, category="basic", purpose="验证忽略大小写和符号"),
+            _authoritative_case(contract, name="非回文", args=["race a car"], input_text="race a car", expected=False, category="normal", purpose="验证否定分支"),
+            _authoritative_case(contract, name="空字符串", args=[""], input_text="", expected=True, category="edge", purpose="验证空输入"),
         ]
     if contract.get("id") == "fibonacci":
         return [
-            {"name": "零项", "args": [0], "input": "n=0", "expected": 0, "category": "edge"},
-            {"name": "第一项", "args": [1], "input": "n=1", "expected": 1, "category": "edge"},
-            {"name": "常规输入", "args": [10], "input": "n=10", "expected": 55, "category": "basic"},
+            _authoritative_case(contract, name="零项", args=[0], input_text="n=0", expected=0, category="edge", purpose="验证初始边界"),
+            _authoritative_case(contract, name="第一项", args=[1], input_text="n=1", expected=1, category="edge", purpose="验证初始边界"),
+            _authoritative_case(contract, name="常规输入", args=[10], input_text="n=10", expected=55, category="basic", purpose="验证迭代结果"),
+        ]
+    if contract.get("id") == "maximum":
+        return [
+            _authoritative_case(contract, name="常规数组", args=[[1, 9, 3, 7]], input_text="[1,9,3,7]", expected=9, category="basic", purpose="验证常规最大值"),
+            _authoritative_case(contract, name="全负数", args=[[-5, -1, -10]], input_text="[-5,-1,-10]", expected=-1, category="edge", purpose="防止错误地把初始最大值设为 0"),
+            _authoritative_case(contract, name="单元素", args=[[42]], input_text="[42]", expected=42, category="edge", purpose="验证最小规模"),
+        ]
+    if contract.get("id") == "reverse_string":
+        return [
+            _authoritative_case(contract, name="常规字符串", args=["hello"], input_text="hello", expected="olleh", category="basic", purpose="验证字符顺序反转"),
+            _authoritative_case(contract, name="单字符", args=["a"], input_text="a", expected="a", category="edge", purpose="验证最小规模"),
+            _authoritative_case(contract, name="空字符串", args=[""], input_text="", expected="", category="edge", purpose="验证空输入"),
         ]
     return []
 
@@ -686,6 +802,107 @@ RAG 算法模板：
     return call_bailian_chat(config, config.text_model, messages), True
 
 
+PLACEHOLDER_EXPECTED_PATTERNS = (
+    "已生成兜底代码",
+    "请根据题目补充",
+    "todo",
+    "待实现",
+    "placeholder",
+    "fallback code",
+)
+
+
+def _matches_contract_return_type(value: Any, return_type: str) -> bool:
+    """Check JSON test expectations against the locked return type."""
+
+    if return_type == "unknown":
+        return True
+    if return_type == "bool":
+        return type(value) is bool
+    if return_type == "int":
+        return type(value) is int
+    if return_type == "float":
+        return type(value) in {int, float}
+    if return_type == "str":
+        return isinstance(value, str)
+    if return_type == "list":
+        return isinstance(value, list)
+    if return_type == "dict":
+        return isinstance(value, dict)
+    return False
+
+
+def validate_model_test_cases(
+    cases: List[Dict[str, Any]],
+    contract: Dict[str, Any],
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Quarantine model-authored tests unless their structure is defensible.
+
+    Model cases are always advisory. Only system-owned authoritative cases may
+    drive automatic repair, preventing a hallucinated expected value from
+    rewriting otherwise correct code.
+    """
+
+    accepted: List[Dict[str, Any]] = []
+    rejected: List[str] = []
+    expected_arg_count = contract.get("argument_count")
+    return_type = str(contract.get("return_type", "unknown"))
+
+    for index, raw_case in enumerate(cases[:20], start=1):
+        if not isinstance(raw_case, dict):
+            rejected.append(f"用例 {index} 不是 JSON 对象")
+            continue
+        args = raw_case.get("args", [])
+        kwargs = raw_case.get("kwargs", {})
+        if not isinstance(args, list):
+            rejected.append(f"用例 {index} 的 args 不是数组")
+            continue
+        if not isinstance(kwargs, dict):
+            rejected.append(f"用例 {index} 的 kwargs 不是对象")
+            continue
+        if raw_case.get("contract_id") != contract.get("id"):
+            rejected.append(f"用例 {index} 的 contract_id 与锁定契约不一致")
+            continue
+        if raw_case.get("contract_fingerprint") != contract.get("fingerprint"):
+            rejected.append(f"用例 {index} 的语义指纹与锁定契约不一致")
+            continue
+        if expected_arg_count is not None and len(args) != expected_arg_count:
+            rejected.append(
+                f"用例 {index} 参数数量为 {len(args)}，契约要求 {expected_arg_count}"
+            )
+            continue
+        if "expected" not in raw_case:
+            rejected.append(f"用例 {index} 缺少 expected")
+            continue
+
+        expected = raw_case["expected"]
+        if isinstance(expected, str) and any(
+            pattern in expected.lower()
+            for pattern in PLACEHOLDER_EXPECTED_PATTERNS
+        ):
+            rejected.append(f"用例 {index} 的 expected 是兜底/占位文本")
+            continue
+        if not _matches_contract_return_type(expected, return_type):
+            rejected.append(
+                f"用例 {index} 的 expected 类型不符合契约返回类型 {return_type}"
+            )
+            continue
+
+        item = dict(raw_case)
+        item.setdefault("name", f"模型建议用例 {index}")
+        item.setdefault("input", item.get("args", []))
+        item.setdefault("category", "advisory")
+        item.setdefault("purpose", "模型建议，等待人工确认")
+        item["source"] = "model_advisory"
+        item["trusted"] = False
+        item["validation_status"] = "manual_review"
+        item["contract_id"] = contract.get("id", "")
+        item["contract_fingerprint"] = contract.get("fingerprint", "")
+        accepted.append(item)
+
+    return accepted, rejected
+
+
 def offline_test_plan(problem: str, reason: str = "") -> Tuple[str, List[Dict[str, Any]]]:
     """测试生成 Agent 的离线兜底版本。
 
@@ -731,27 +948,25 @@ def offline_test_plan(problem: str, reason: str = "") -> Tuple[str, List[Dict[st
         ]
     elif "情感" in problem or "sentiment" in lower:
         cases = [
-            {"name": "正向文本", "args": ["这个产品很好，我非常满意"], "input": "这个产品很好，我非常满意", "expected": "positive", "purpose": "验证正向识别"},
-            {"name": "负向文本", "args": ["体验糟糕，不推荐"], "input": "体验糟糕，不推荐", "expected": "negative", "purpose": "验证负向识别"},
-            {"name": "中性文本", "args": ["今天是星期二"], "input": "今天是星期二", "expected": "neutral", "purpose": "验证中性兜底"},
+            {"name": "正向文本", "args": ["这个产品很好，我非常满意"], "input": "这个产品很好，我非常满意", "expected": "positive", "purpose": "模型建议，等待人工确认", "source": "offline_advisory", "trusted": False, "validation_status": "manual_review"},
+            {"name": "负向文本", "args": ["体验糟糕，不推荐"], "input": "体验糟糕，不推荐", "expected": "negative", "purpose": "模型建议，等待人工确认", "source": "offline_advisory", "trusted": False, "validation_status": "manual_review"},
+            {"name": "中性文本", "args": ["今天是星期二"], "input": "今天是星期二", "expected": "neutral", "purpose": "模型建议，等待人工确认", "source": "offline_advisory", "trusted": False, "validation_status": "manual_review"},
         ]
     else:
-        cases = [
-            {
-                "name": "通用兜底",
-                "args": [],
-                "input": "无参数",
-                "expected": "已生成兜底代码：请根据题目补充核心算法逻辑。",
-                "purpose": "验证兜底程序可执行",
-            },
-        ]
+        cases = []
 
     note = f"\n\n> 测试计划兜底原因：{reason}" if reason else ""
-    rows = "\n".join(
-        f"- {case['name']}：输入 `{case.get('input', case.get('args', []))}`，"
-        f"期望 `{case['expected']}`，目的：{case.get('purpose', '验证题目语义')}"
-        for case in cases
-    )
+    if cases:
+        rows = "\n".join(
+            f"- {case['name']}：输入 `{case.get('input', case.get('args', []))}`，"
+            f"期望 `{case['expected']}`，目的：{case.get('purpose', '验证题目语义')}"
+            for case in cases
+        )
+    else:
+        rows = (
+            "- 当前题型没有系统权威 Oracle。系统不会制造兜底期望值，"
+            "也不会让未经确认的测试驱动自动修复；生成结果需人工确认语义。"
+        )
     plan = f"""
 ## 测试策略
 
@@ -799,7 +1014,9 @@ def generate_tests_with_bailian(
     "kwargs": {},
     "expected": [0, 1],
     "category": "basic",
-    "purpose": "验证常规输入"
+    "purpose": "验证常规输入",
+    "contract_id": "使用下方锁定契约的编号",
+    "contract_fingerprint": "使用下方锁定契约的语义指纹"
   }
 ]
 ```
@@ -809,6 +1026,8 @@ def generate_tests_with_bailian(
 2. 覆盖基础样例、边界样例、异常或极端样例。
 3. 每个用例说明输入、期望输出和测试目的。
 4. args 必须是 JSON 数组，expected 必须是可直接比较的 JSON 值。
+5. 每个用例必须携带 contract_id 和 contract_fingerprint，且不得输出兜底提示或占位文本作为 expected。
+6. 你生成的用例只是建议；系统是否执行由语义校验层决定。
 """
     user_prompt = f"""
 题目：
@@ -825,7 +1044,7 @@ def generate_tests_with_bailian(
         {"role": "user", "content": user_prompt.strip()},
     ]
     content = call_bailian_chat(config, config.text_model, messages)
-    cases: List[Dict[str, Any]] = []
+    model_cases: List[Dict[str, Any]] = []
     json_blocks = re.findall(r"```json\s*(.*?)```", content, flags=re.DOTALL | re.IGNORECASE)
     for block in json_blocks:
         try:
@@ -842,9 +1061,10 @@ def generate_tests_with_bailian(
             and "expected" in item
         ]
         if valid_cases:
-            cases = valid_cases
+            model_cases = valid_cases
             break
-    system_cases = authoritative_test_cases(contract or infer_problem_contract(problem))
+    locked_contract = contract or infer_problem_contract(problem)
+    system_cases = authoritative_test_cases(locked_contract)
     if system_cases:
         cases = system_cases
         content += (
@@ -852,8 +1072,23 @@ def generate_tests_with_bailian(
             "模型生成的测试建议已保留作为说明；实际执行以下不可修改的语义测试：\n\n"
             f"```json\n{json.dumps(system_cases, ensure_ascii=False, indent=2)}\n```"
         )
-    elif not cases:
-        _, cases = offline_test_plan(problem, "模型未返回可解析的结构化测试用例。")
+    else:
+        cases, rejected = validate_model_test_cases(model_cases, locked_contract)
+        if rejected:
+            content += (
+                "\n\n## 语义校验拦截\n\n"
+                + "\n".join(f"- {message}" for message in rejected)
+            )
+        if cases:
+            content += (
+                "\n\n> 当前题型没有系统权威 Oracle。以上结构化用例仅供人工确认，"
+                "不会进入自动修复闭环。"
+            )
+        else:
+            _, cases = offline_test_plan(
+                problem,
+                "模型用例缺失或未通过语义校验，已禁止其驱动自动修复。",
+            )
     return content, cases, True
 
 
@@ -944,8 +1179,28 @@ def offline_solution(problem: str, reason: str = "") -> str:
     """
 
     normalized = problem.lower()
+    compact_normalized = re.sub(r"[\s,，.!！。:_\-]+", "", normalized)
 
-    if (
+    if "helloworld" in compact_normalized or "你好世界" in problem:
+        code = r'''
+def solution() -> str:
+    return "Hello, World!"
+
+
+def _run_tests() -> None:
+    expected = "Hello, World!"
+    actual = solution()
+    assert actual == expected, f"expected={expected!r}, got={actual!r}"
+    print(actual)
+
+
+if __name__ == "__main__":
+    _run_tests()
+'''.strip()
+        title = "Hello World 脚本"
+        idea = "定义统一评测入口 solution，返回题目要求的固定文本；脚本运行时输出同一结果。"
+        complexity = "时间复杂度 O(1)，空间复杂度 O(1)。"
+    elif (
         "two sum" in normalized
         or "两数之和" in problem
         or ("target" in normalized and ("nums" in normalized or "下标" in problem))
@@ -1317,6 +1572,17 @@ def evaluate_python_code(
     return execution_report, auto_report["details"]
 
 
+def trusted_test_cases(test_cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return only cases allowed to decide pass/fail or trigger code repair."""
+
+    return [
+        case
+        for case in test_cases
+        if bool(case.get("trusted", True))
+        and case.get("validation_status", "verified") == "verified"
+    ]
+
+
 def agent_result_to_dict(result: AgentResult) -> Dict[str, Any]:
     """将 AgentResult 转成后端、数据库和前端共用的 JSON 字典。
 
@@ -1355,6 +1621,12 @@ def agent_result_to_dict(result: AgentResult) -> Dict[str, Any]:
         "project_document": result.project_document,
         "metrics": metrics,
         "problem_contract": metrics.get("problem_contract", {}),
+        "semantic_verification_status": metrics.get(
+            "semantic_verification_status",
+            "manual_review",
+        ),
+        "trusted_test_count": metrics.get("trusted_test_count", 0),
+        "advisory_test_count": metrics.get("advisory_test_count", 0),
         "agent_steps": steps,
         "retrieved_templates": list(result.retrieved_templates),
         "rag_hits": list(result.retrieved_templates),
@@ -1405,6 +1677,7 @@ def run_execution_debug_agent(
     repair_attempts: List[Dict[str, Any]] = []
     evaluated_cases: List[Dict[str, Any]] = []
     test_cases = test_cases or []
+    executable_cases = trusted_test_cases(test_cases)
 
     if not code:
         return code, "未提取到可执行代码。", repair_attempts, evaluated_cases, api_used, True
@@ -1422,9 +1695,15 @@ def run_execution_debug_agent(
     current_code = code
     execution_report, evaluated_cases = evaluate_python_code(
         current_code,
-        test_cases,
+        executable_cases,
         config.execution_timeout,
     )
+    if not executable_cases:
+        execution_report += (
+            "\n\n语义验证：需人工确认\n"
+            "原因：当前题型没有通过系统语义校验的权威测试用例；"
+            "模型建议用例已隔离，不会触发自动修复。"
+        )
     if execution_succeeded(execution_report):
         return (
             current_code,
@@ -1446,7 +1725,7 @@ def run_execution_debug_agent(
                 execution_report=execution_report,
                 test_plan=test_plan,
                 contract=contract,
-                test_cases=test_cases,
+                test_cases=executable_cases,
             )
             api_used = api_used or used
             repaired_code = extract_code(repair_markdown) or repair_markdown.strip()
@@ -1478,9 +1757,14 @@ def run_execution_debug_agent(
         current_code = repaired_code
         execution_report, evaluated_cases = evaluate_python_code(
             current_code,
-            test_cases,
+            executable_cases,
             config.execution_timeout,
         )
+        if not executable_cases:
+            execution_report += (
+                "\n\n语义验证：需人工确认\n"
+                "原因：修复仅解决代码可运行性，未宣称算法语义已通过验证。"
+            )
         repair_attempts.append(
             {
                 "round": round_index,
@@ -1564,7 +1848,8 @@ def build_project_document(
 
 ## 2. 技术方案
 
-- 前端界面：Streamlit 单文件页面
+- 前端界面：Vue3 + Element Plus；保留 Streamlit 单文件演示入口
+- 后端接口：FastAPI + SQLite
 - 大模型接口：阿里云百炼 OpenAI 兼容接口
 - 文本模型：{metrics.get("text_model", DEFAULT_TEXT_MODEL)}
 - 视觉模型：{metrics.get("vision_model", DEFAULT_VISION_MODEL)}
@@ -1586,6 +1871,10 @@ def build_project_document(
 - 总耗时：{metrics.get("total_ms", 0)} ms
 - 题目来源：{metrics.get("input_type", "text")}
 - 代码长度：{len(code)} 字符
+- 语义验证：{metrics.get("semantic_verification_status", "manual_review")}
+- 系统权威测试数：{metrics.get("trusted_test_count", 0)}
+- 模型建议测试数：{metrics.get("advisory_test_count", 0)}
+- 语义契约指纹：{metrics.get("problem_contract", {}).get("fingerprint", "")}
 
 ## 5. 题目内容
 
@@ -1645,6 +1934,8 @@ def build_project_document(
 | 是否生成执行报告 | {'通过' if bool(execution_report.strip()) else '未通过'} |
 | 是否记录 5 个 Agent 输出 | {'通过' if len(agent_steps) >= 5 else '未通过'} |
 | 是否返回 RAG 算法模板 | {'通过' if bool(retrieved_templates) else '未通过'} |
+| 语义验证状态 | {metrics.get("semantic_verification_status", "manual_review")} |
+| 权威测试是否通过 | {'通过' if metrics.get("semantic_verification_status") == "verified" else "需人工确认"} |
 | API 失败兜底 | {'通过' if fallback_used else '未触发'} |
 | 文档生成 | 通过 |
 
@@ -1895,6 +2186,18 @@ def solve_problem(
     if final_code != code:
         solution_markdown += "\n\n## 自动调试修复\n\n执行调试 Agent 已根据运行日志修复代码，最终版本请查看“Python 代码”页签。"
     code = final_code
+    trusted_cases = trusted_test_cases(test_cases)
+    advisory_test_count = len(test_cases) - len(trusted_cases)
+    if trusted_cases:
+        semantic_verification_status = (
+            "verified"
+            if len(trusted_cases) == len(test_cases)
+            and all(bool(case.get("passed")) for case in trusted_cases)
+            else "failed"
+        )
+    else:
+        semantic_verification_status = "manual_review"
+
     agent_steps.append(
         build_step(
             name="执行调试 Agent",
@@ -1902,6 +2205,7 @@ def solve_problem(
             input_summary=f"代码长度：{len(code)} 字符\n\n测试计划：{shorten_text(test_plan, 700)}",
             output_summary=(
                 f"执行结果：\n{execution_report}\n\n"
+                f"语义验证状态：{semantic_verification_status}\n"
                 f"修复记录：\n{json.dumps(repair_attempts, ensure_ascii=False, indent=2) if repair_attempts else '未触发修复'}"
             ),
             started_ms=step_started,
@@ -1924,6 +2228,9 @@ def solve_problem(
         "repair_attempt_count": len(repair_attempts),
         "execution_success": execution_succeeded(execution_report),
         "problem_contract": contract,
+        "semantic_verification_status": semantic_verification_status,
+        "trusted_test_count": len(trusted_cases),
+        "advisory_test_count": advisory_test_count,
     }
     document = build_project_document(
         problem=problem,

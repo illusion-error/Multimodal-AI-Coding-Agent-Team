@@ -82,6 +82,11 @@ def init_db() -> None:
                 actual TEXT NOT NULL DEFAULT '',
                 passed INTEGER NOT NULL DEFAULT 0,
                 category TEXT NOT NULL DEFAULT 'normal',
+                source TEXT NOT NULL DEFAULT 'legacy',
+                trusted INTEGER NOT NULL DEFAULT 1,
+                validation_status TEXT NOT NULL DEFAULT 'verified',
+                contract_id TEXT NOT NULL DEFAULT '',
+                contract_fingerprint TEXT NOT NULL DEFAULT '',
                 duration_ms INTEGER NOT NULL DEFAULT 0,
                 error TEXT NOT NULL DEFAULT '',
                 FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
@@ -137,6 +142,19 @@ def init_db() -> None:
         _ensure_column(conn, "agent_steps", "duration_ms INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "agent_steps", "error TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "test_cases", "category TEXT NOT NULL DEFAULT 'normal'")
+        _ensure_column(conn, "test_cases", "source TEXT NOT NULL DEFAULT 'legacy'")
+        _ensure_column(conn, "test_cases", "trusted INTEGER NOT NULL DEFAULT 1")
+        _ensure_column(
+            conn,
+            "test_cases",
+            "validation_status TEXT NOT NULL DEFAULT 'verified'",
+        )
+        _ensure_column(conn, "test_cases", "contract_id TEXT NOT NULL DEFAULT ''")
+        _ensure_column(
+            conn,
+            "test_cases",
+            "contract_fingerprint TEXT NOT NULL DEFAULT ''",
+        )
         _ensure_column(conn, "test_cases", "duration_ms INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "test_cases", "error TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "execution_logs", "duration_ms INTEGER NOT NULL DEFAULT 0")
@@ -328,6 +346,11 @@ def insert_test_case(
     passed: bool,
     *,
     category: str = "normal",
+    source: str = "legacy",
+    trusted: bool = True,
+    validation_status: str = "verified",
+    contract_id: str = "",
+    contract_fingerprint: str = "",
     duration_ms: int = 0,
     error: str = "",
     conn: Optional[sqlite3.Connection] = None,
@@ -339,13 +362,20 @@ def insert_test_case(
         actual,
         int(bool(passed)),
         category,
+        source,
+        int(bool(trusted)),
+        validation_status,
+        contract_id,
+        contract_fingerprint,
         int(duration_ms),
         error,
     )
     sql = """
         INSERT INTO test_cases
-            (task_id, input, expected, actual, passed, category, duration_ms, error)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (task_id, input, expected, actual, passed, category, source, trusted,
+             validation_status, contract_id, contract_fingerprint, duration_ms,
+             error)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     if conn is not None:
         conn.execute(sql, values)
@@ -359,7 +389,8 @@ def get_tests_by_task(task_id: str) -> List[Dict[str, Any]]:
         rows = conn.execute(
             """
             SELECT test_id, input, expected, actual, passed, category,
-                   duration_ms, error
+                   source, trusted, validation_status, contract_id,
+                   contract_fingerprint, duration_ms, error
             FROM test_cases
             WHERE task_id=?
             ORDER BY test_id
@@ -367,7 +398,11 @@ def get_tests_by_task(task_id: str) -> List[Dict[str, Any]]:
             (task_id,),
         ).fetchall()
     return [
-        {**dict(row), "passed": bool(row["passed"])}
+        {
+            **dict(row),
+            "passed": bool(row["passed"]),
+            "trusted": bool(row["trusted"]),
+        }
         for row in rows
     ]
 
@@ -474,6 +509,15 @@ def replace_task_artifacts(
                 str(case.get("actual", "")),
                 bool(case.get("passed", False)),
                 category=str(case.get("category", case.get("name", "normal"))),
+                source=str(case.get("source", "legacy")),
+                trusted=bool(case.get("trusted", True)),
+                validation_status=str(
+                    case.get("validation_status", "verified")
+                ),
+                contract_id=str(case.get("contract_id", "")),
+                contract_fingerprint=str(
+                    case.get("contract_fingerprint", "")
+                ),
                 duration_ms=int(case.get("duration_ms", 0) or 0),
                 error=str(case.get("error", "")),
                 conn=conn,
@@ -525,6 +569,7 @@ def calc_metrics() -> Dict[str, Any]:
             """
             SELECT COUNT(*), COALESCE(SUM(CASE WHEN passed=1 THEN 1 ELSE 0 END), 0)
             FROM test_cases
+            WHERE trusted=1 AND validation_status='verified'
             """
         ).fetchone()
         repair_total, repair_passed = conn.execute(

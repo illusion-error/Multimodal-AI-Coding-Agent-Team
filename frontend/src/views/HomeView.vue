@@ -94,6 +94,23 @@
 
     <!-- 结果区 -->
     <el-card v-if="result && !loading" class="result-card">
+      <el-alert
+        v-if="result.semantic_verification_status === 'manual_review'"
+        title="代码已运行，但题型缺少系统权威测试，模型建议用例未参与自动修复，请人工确认题意与结果。"
+        type="warning"
+        :closable="false"
+        show-icon
+        class="semantic-alert"
+      />
+      <el-alert
+        v-else-if="result.semantic_verification_status === 'verified'"
+        title="语义契约与系统权威测试均已通过。"
+        type="success"
+        :closable="false"
+        show-icon
+        class="semantic-alert"
+      />
+
       <!-- 部署信息卡片 -->
       <div class="deployment-cards">
         <el-row :gutter="16">
@@ -222,13 +239,20 @@
           <div class="tab-content">
             <el-table :data="testCases" empty-text="暂无测试用例">
               <el-table-column prop="category" label="类型" width="120" />
+              <el-table-column label="来源" width="130">
+                <template #default="{ row }">
+                  <el-tag :type="row.trusted ? 'success' : 'warning'" size="small">
+                    {{ row.trusted ? '系统权威' : '模型建议' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
               <el-table-column prop="input" label="输入" min-width="180" />
               <el-table-column prop="expected" label="期望" min-width="130" />
               <el-table-column prop="actual" label="实际" min-width="130" />
               <el-table-column label="结果" width="90">
                 <template #default="{ row }">
-                  <el-tag :type="row.passed ? 'success' : 'danger'">
-                    {{ row.passed ? '通过' : '失败' }}
+                  <el-tag :type="row.trusted ? (row.passed ? 'success' : 'danger') : 'info'">
+                    {{ row.trusted ? (row.passed ? '通过' : '失败') : '待确认' }}
                   </el-tag>
                 </template>
               </el-table-column>
@@ -822,6 +846,7 @@ onUnmounted(() => {
 .contract-panel { margin-top: 18px; }
 .contract-rules { margin: 0; padding-left: 20px; }
 .contract-rules li { margin: 4px 0; }
+.semantic-alert { margin-bottom: 16px; }
 
 .code-container {
   display: flex;

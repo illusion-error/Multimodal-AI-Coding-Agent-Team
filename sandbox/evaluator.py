@@ -125,6 +125,17 @@ def run_auto_tests(
                 "passed": passed,
                 "category": case.get("category", "normal"),
                 "purpose": case.get("purpose", ""),
+                "source": case.get("source", "legacy"),
+                "trusted": bool(case.get("trusted", True)),
+                "validation_status": case.get(
+                    "validation_status",
+                    "verified",
+                ),
+                "contract_id": case.get("contract_id", ""),
+                "contract_fingerprint": case.get(
+                    "contract_fingerprint",
+                    "",
+                ),
                 "duration_ms": execution["duration_ms"],
                 "error": payload.get("error", ""),
                 "status": execution["status"],

@@ -47,6 +47,41 @@ def test_text_api_rejects_corrupted_question_mark_input(client):
     assert "乱码" in response.json()["detail"]
 
 
+def test_hello_world_api_uses_authoritative_semantics(client):
+    created = client.post(
+        "/api/tasks/text",
+        json={"problem_text": "write a simple hello world script"},
+    )
+    task_id = created.json()["data"]["task_id"]
+    detail = client.get(f"/api/tasks/{task_id}").json()["data"]
+    cases = client.get(f"/api/tasks/{task_id}/tests").json()["data"]
+
+    assert detail["status"] == "completed"
+    assert detail["problem_contract"]["id"] == "hello_world"
+    assert detail["semantic_verification_status"] == "verified"
+    assert detail["trusted_test_count"] == 1
+    assert len(cases) == 1
+    assert cases[0]["source"] == "system_authoritative"
+    assert cases[0]["trusted"] is True
+    assert cases[0]["passed"] is True
+    assert "Hello, World!" in cases[0]["expected"]
+
+
+def test_unknown_problem_runs_without_using_advisory_tests_as_oracle(client):
+    created = client.post(
+        "/api/tasks/text",
+        json={"problem_text": "implement a custom transformation not in registry"},
+    )
+    task_id = created.json()["data"]["task_id"]
+    detail = client.get(f"/api/tasks/{task_id}").json()["data"]
+
+    assert detail["status"] == "completed"
+    assert detail["semantic_verification_status"] == "manual_review"
+    assert detail["trusted_test_count"] == 0
+    assert "人工确认" in detail["notes"]
+    assert detail["repair_attempts"] == []
+
+
 def test_failed_execution_is_not_counted_as_completed(client, monkeypatch):
     import backend.main as backend_main
 

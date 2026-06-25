@@ -48,7 +48,7 @@ from backend.database import (  # noqa: E402
 )
 
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 AGENT_AVAILABLE = True
 AGENT_IMPORT_ERROR = ""
 ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
@@ -184,10 +184,31 @@ def run_agent_task(
         )
         tests = data.get("test_cases", [])
         execution_ok = data["execution_report"].get("exit_code") == 0
-        tests_ok = bool(tests) and all(bool(case.get("passed")) for case in tests)
-        final_status = "completed" if execution_ok and tests_ok else "failed"
+        trusted_tests = [
+            case
+            for case in tests
+            if bool(case.get("trusted", True))
+            and case.get("validation_status", "verified") == "verified"
+        ]
+        tests_ok = bool(trusted_tests) and all(
+            bool(case.get("passed")) for case in trusted_tests
+        )
+        semantic_status = str(
+            data.get("semantic_verification_status", "manual_review")
+        )
+        manual_review_ok = semantic_status == "manual_review" and execution_ok
+        final_status = (
+            "completed"
+            if execution_ok and (tests_ok or manual_review_ok)
+            else "failed"
+        )
         data["status"] = final_status
-        if not tests_ok:
+        if manual_review_ok:
+            data["notes"] = (
+                "代码已成功运行，但当前题型没有系统权威测试；"
+                "模型建议用例已隔离，需人工确认算法语义。"
+            )
+        elif not tests_ok:
             data["notes"] = "生成代码未通过全部自动测试，请查看失败用例和修复记录。"
 
         replace_task_artifacts(
