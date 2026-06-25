@@ -1,288 +1,530 @@
-import sqlite3
-import os
+from __future__ import annotations
+
 import json
+import os
+import sqlite3
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional
 
-# 和main保持一致路径
-current_dir = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(current_dir, "tasks.db")
 
-# 统一获取数据库连接（解决多线程锁、外键、行字典返回）
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _database_path() -> Path:
+    configured = os.getenv("DATABASE_PATH", "backend/data/tasks.db")
+    path = Path(configured)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+DB_PATH = _database_path()
+
+
+def utc_now() -> str:
+    return datetime.now().isoformat(timespec="milliseconds")
+
+
 def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    # 开启外键约束，级联删除
-    conn.execute("PRAGMA foreign_keys = ON;")
-    # 查询返回Row字典，不用记元组下标
+    conn = sqlite3.connect(DB_PATH, timeout=5, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
-# 初始化四张表（新增execution_logs日志表）
-def init_db():
-    conn = None
-    try:
-        conn = get_conn()
-        c = conn.cursor()
-        # 任务主表，核心字段非空
-        c.execute('''
-        CREATE TABLE IF NOT EXISTS tasks (
-            task_id TEXT PRIMARY KEY,
-            status TEXT NOT NULL,
-            created_at TIMESTAMP NOT NULL,
-            data TEXT NOT NULL
-        )
-        ''')
-        # Agent步骤表，外键关联任务，级联删除
-        c.execute('''
-        CREATE TABLE IF NOT EXISTS agent_steps (
-            step_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            task_id TEXT NOT NULL,
-            step_name TEXT NOT NULL,
-            input TEXT,
-            output TEXT,
-            status TEXT NOT NULL,
-            duration FLOAT DEFAULT 0.0,
-            FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
-        )
-        ''')
-        # 测试用例表，外键级联删除
-        c.execute('''
-        CREATE TABLE IF NOT EXISTS test_cases (
-            test_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            task_id TEXT NOT NULL,
-            input TEXT,
-            expected TEXT,
-            actual TEXT,
-            passed BOOLEAN NOT NULL DEFAULT 0,
-            FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
-        )
-        ''')
-        # 新增执行日志表（文档要求：运行日志、错误、修复记录）
-        c.execute('''
-        CREATE TABLE IF NOT EXISTS execution_logs (
-            log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            task_id TEXT NOT NULL,
-            repair_round INTEGER DEFAULT 0,
-            error_msg TEXT,
-            old_code TEXT,
-            new_code TEXT,
-            repair_success BOOLEAN DEFAULT 0,
-            log_time TIMESTAMP NOT NULL,
-            FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
-        )
-        ''')
-        conn.commit()
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        raise e
-    finally:
-        if conn:
-            conn.close()
 
-# 任务增改，增加时间校验、中文正常存储
-def upsert_task(task_id: str, status: str, data: dict, created_at: Optional[str] = None):
-    conn = None
-    try:
-        conn = get_conn()
-        c = conn.cursor()
-        if created_at is None:
-            now = datetime.now().isoformat()
-        else:
-            # 校验时间格式，防止非法字符串
-            datetime.fromisoformat(created_at)
-            now = created_at
-        c.execute('''
-        INSERT OR REPLACE INTO tasks (task_id, status, created_at, data)
-        VALUES (?, ?, ?, ?)
-        ''', (task_id, status, now, json.dumps(data, ensure_ascii=False)))
-        conn.commit()
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        raise e
-    finally:
-        if conn:
-            conn.close()
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
 
-# 查询单任务，自动解析data json，返回字典适配main
+
+def _ensure_column(conn: sqlite3.Connection, table: str, definition: str) -> None:
+    name = definition.split()[0]
+    if name not in _table_columns(conn, table):
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
+
+
+def init_db() -> None:
+    with get_conn() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS tasks (
+                task_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                input_type TEXT NOT NULL DEFAULT 'text',
+                problem TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                data TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS agent_steps (
+                step_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL,
+                step_order INTEGER NOT NULL DEFAULT 0,
+                step_name TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT '',
+                input TEXT NOT NULL DEFAULT '',
+                output TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL,
+                duration_ms INTEGER NOT NULL DEFAULT 0,
+                error TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS test_cases (
+                test_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL,
+                input TEXT NOT NULL DEFAULT '',
+                expected TEXT NOT NULL DEFAULT '',
+                actual TEXT NOT NULL DEFAULT '',
+                passed INTEGER NOT NULL DEFAULT 0,
+                category TEXT NOT NULL DEFAULT 'normal',
+                duration_ms INTEGER NOT NULL DEFAULT 0,
+                error TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS execution_logs (
+                log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL,
+                repair_round INTEGER NOT NULL DEFAULT 0,
+                error_msg TEXT NOT NULL DEFAULT '',
+                old_code TEXT NOT NULL DEFAULT '',
+                new_code TEXT NOT NULL DEFAULT '',
+                repair_success INTEGER NOT NULL DEFAULT 0,
+                duration_ms INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
+            );
+
+            """
+        )
+
+        # Upgrade databases created by earlier project revisions without data loss.
+        _ensure_column(conn, "tasks", "input_type TEXT NOT NULL DEFAULT 'text'")
+        _ensure_column(conn, "tasks", "problem TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "tasks", "updated_at TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "agent_steps", "step_order INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "agent_steps", "role TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "agent_steps", "duration_ms INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "agent_steps", "error TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "test_cases", "category TEXT NOT NULL DEFAULT 'normal'")
+        _ensure_column(conn, "test_cases", "duration_ms INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "test_cases", "error TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "execution_logs", "duration_ms INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "execution_logs", "created_at TEXT NOT NULL DEFAULT ''")
+
+        now = utc_now()
+        conn.execute(
+            "UPDATE tasks SET updated_at=created_at WHERE updated_at='' OR updated_at IS NULL"
+        )
+        conn.execute(
+            "UPDATE execution_logs SET created_at=? "
+            "WHERE created_at='' OR created_at IS NULL",
+            (now,),
+        )
+        conn.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_tasks_created_at
+                ON tasks(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_steps_task_order
+                ON agent_steps(task_id, step_order, step_id);
+            CREATE INDEX IF NOT EXISTS idx_tests_task
+                ON test_cases(task_id, test_id);
+            CREATE INDEX IF NOT EXISTS idx_logs_task_round
+                ON execution_logs(task_id, repair_round, log_id);
+            """
+        )
+
+
+def create_task(
+    task_id: str,
+    status: str,
+    data: Dict[str, Any],
+    *,
+    input_type: str = "text",
+    problem: str = "",
+    created_at: Optional[str] = None,
+) -> None:
+    now = created_at or utc_now()
+    payload = json.dumps(data, ensure_ascii=False)
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO tasks
+                (task_id, status, input_type, problem, created_at, updated_at, data)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (task_id, status, input_type, problem, now, now, payload),
+        )
+
+
+def update_task(task_id: str, status: str, data: Dict[str, Any]) -> None:
+    payload = json.dumps(data, ensure_ascii=False)
+    with get_conn() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE tasks
+            SET status=?, problem=?, updated_at=?, data=?
+            WHERE task_id=?
+            """,
+            (status, str(data.get("problem", "")), utc_now(), payload, task_id),
+        )
+        if cursor.rowcount == 0:
+            raise KeyError(f"Task not found: {task_id}")
+
+
+def upsert_task(
+    task_id: str,
+    status: str,
+    data: Dict[str, Any],
+    created_at: Optional[str] = None,
+) -> None:
+    """Backward-compatible helper that never replaces/deletes an existing row."""
+
+    if get_task_by_id(task_id):
+        update_task(task_id, status, data)
+    else:
+        create_task(
+            task_id,
+            status,
+            data,
+            problem=str(data.get("problem", "")),
+            created_at=created_at,
+        )
+
+
 def get_task_by_id(task_id: str) -> Optional[Dict[str, Any]]:
-    conn = get_conn()
-    try:
-        row = conn.execute("SELECT * FROM tasks WHERE task_id=?", (task_id,)).fetchone()
-        if not row:
-            return None
-        task = dict(row)
-        task["data"] = json.loads(task["data"])
-        return task
-    finally:
-        conn.close()
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT task_id, status, input_type, problem, created_at, updated_at, data
+            FROM tasks
+            WHERE task_id=?
+            """,
+            (task_id,),
+        ).fetchone()
+    if not row:
+        return None
+    task = dict(row)
+    task["data"] = json.loads(task["data"])
+    return task
 
-# 查询所有任务 倒序，返回字典列表
+
 def list_all_tasks() -> List[Dict[str, Any]]:
-    conn = get_conn()
-    try:
-        rows = conn.execute('''
-        SELECT task_id, status, created_at FROM tasks ORDER BY created_at DESC
-        ''').fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT task_id, status, input_type, problem, created_at, updated_at, data
+            FROM tasks
+            ORDER BY created_at DESC
+            """
+        ).fetchall()
+    tasks: List[Dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        data = json.loads(item.pop("data"))
+        item["problem"] = item["problem"] or str(data.get("problem", ""))
+        item["total_ms"] = data.get("total_ms", 0)
+        tasks.append(item)
+    return tasks
 
-# 插入步骤
-def insert_step(task_id: str, step_name: str, input_text: str, output_text: str, status: str, duration: float):
-    conn = None
-    try:
-        conn = get_conn()
-        c = conn.cursor()
-        c.execute('''
-        INSERT INTO agent_steps (task_id, step_name, input, output, status, duration)
-        VALUES (?,?,?,?,?,?)
-        ''', (task_id, step_name, input_text, output_text, status, duration))
-        conn.commit()
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        raise e
-    finally:
-        if conn:
-            conn.close()
 
-# 查询任务全部步骤，返回完整字段（含step_id）
+def insert_step(
+    task_id: str,
+    step_name: str,
+    input_text: str,
+    output_text: str,
+    status: str,
+    duration: float = 0.0,
+    *,
+    role: str = "",
+    error: str = "",
+    duration_ms: Optional[int] = None,
+    step_order: int = 0,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
+    milliseconds = (
+        int(duration_ms)
+        if duration_ms is not None
+        else int(duration * 1000 if duration < 1000 else duration)
+    )
+    values = (
+        task_id,
+        step_order,
+        step_name,
+        role,
+        input_text,
+        output_text,
+        status,
+        milliseconds,
+        error,
+    )
+    sql = """
+        INSERT INTO agent_steps
+            (task_id, step_order, step_name, role, input, output, status,
+             duration_ms, error)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+    if conn is not None:
+        conn.execute(sql, values)
+        return
+    with get_conn() as local_conn:
+        local_conn.execute(sql, values)
+
+
 def get_steps_by_task(task_id: str) -> List[Dict[str, Any]]:
-    conn = get_conn()
-    try:
-        rows = conn.execute('''
-        SELECT step_id, step_name, input, output, status, duration
-        FROM agent_steps WHERE task_id=?
-        ''', (task_id,)).fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT step_id, step_order, step_name, role, input, output, status,
+                   duration_ms, error
+            FROM agent_steps
+            WHERE task_id=?
+            ORDER BY step_order, step_id
+            """,
+            (task_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
-# 插入测试用例
-def insert_test_case(task_id: str, input_val: str, expected: str, actual: str, passed: bool):
-    conn = None
-    try:
-        conn = get_conn()
-        c = conn.cursor()
-        c.execute('''
-        INSERT INTO test_cases (task_id, input, expected, actual, passed)
-        VALUES (?,?,?,?,?)
-        ''', (task_id, input_val, expected, actual, passed))
-        conn.commit()
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        raise e
-    finally:
-        if conn:
-            conn.close()
 
-# 查询测试用例，返回完整字段（含test_id）
+def insert_test_case(
+    task_id: str,
+    input_val: str,
+    expected: str,
+    actual: str,
+    passed: bool,
+    *,
+    category: str = "normal",
+    duration_ms: int = 0,
+    error: str = "",
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
+    values = (
+        task_id,
+        input_val,
+        expected,
+        actual,
+        int(bool(passed)),
+        category,
+        int(duration_ms),
+        error,
+    )
+    sql = """
+        INSERT INTO test_cases
+            (task_id, input, expected, actual, passed, category, duration_ms, error)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """
+    if conn is not None:
+        conn.execute(sql, values)
+        return
+    with get_conn() as local_conn:
+        local_conn.execute(sql, values)
+
+
 def get_tests_by_task(task_id: str) -> List[Dict[str, Any]]:
-    conn = get_conn()
-    try:
-        rows = conn.execute('''
-        SELECT test_id, input, expected, actual, passed
-        FROM test_cases WHERE task_id=?
-        ''', (task_id,)).fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT test_id, input, expected, actual, passed, category,
+                   duration_ms, error
+            FROM test_cases
+            WHERE task_id=?
+            ORDER BY test_id
+            """,
+            (task_id,),
+        ).fetchall()
+    return [
+        {**dict(row), "passed": bool(row["passed"])}
+        for row in rows
+    ]
 
-# 新增：删除任务（级联删除步骤、测试用例、日志）适配rerun清理旧任务
-def delete_task(task_id: str):
-    conn = None
+
+def insert_execution_log(
+    task_id: str,
+    repair_round: int,
+    error_msg: str,
+    old_code: str,
+    new_code: str,
+    repair_success: bool,
+    *,
+    duration_ms: int = 0,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
+    target_conn = conn or get_conn()
+    values = [
+        task_id,
+        int(repair_round),
+        error_msg,
+        old_code,
+        new_code,
+        int(bool(repair_success)),
+        int(duration_ms),
+        utc_now(),
+    ]
+    columns = [
+        "task_id",
+        "repair_round",
+        "error_msg",
+        "old_code",
+        "new_code",
+        "repair_success",
+        "duration_ms",
+        "created_at",
+    ]
+    if "log_time" in _table_columns(target_conn, "execution_logs"):
+        columns.append("log_time")
+        values.append(values[-1])
+    placeholders = ", ".join("?" for _ in columns)
+    sql = f"""
+        INSERT INTO execution_logs
+            ({", ".join(columns)})
+        VALUES ({placeholders})
+    """
     try:
-        conn = get_conn()
+        target_conn.execute(sql, values)
+        if conn is None:
+            target_conn.commit()
+    finally:
+        if conn is None:
+            target_conn.close()
+
+
+def get_execution_logs_by_task(task_id: str) -> List[Dict[str, Any]]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT log_id, repair_round, error_msg, old_code, new_code,
+                   repair_success, duration_ms, created_at
+            FROM execution_logs
+            WHERE task_id=?
+            ORDER BY repair_round, log_id
+            """,
+            (task_id,),
+        ).fetchall()
+    return [
+        {**dict(row), "repair_success": bool(row["repair_success"])}
+        for row in rows
+    ]
+
+
+def replace_task_artifacts(
+    task_id: str,
+    *,
+    steps: Iterable[Dict[str, Any]],
+    tests: Iterable[Dict[str, Any]],
+    repairs: Iterable[Dict[str, Any]],
+) -> None:
+    """Replace a task's child records atomically after an Agent run."""
+
+    with get_conn() as conn:
+        conn.execute("DELETE FROM agent_steps WHERE task_id=?", (task_id,))
+        conn.execute("DELETE FROM test_cases WHERE task_id=?", (task_id,))
+        conn.execute("DELETE FROM execution_logs WHERE task_id=?", (task_id,))
+        for index, step in enumerate(steps, start=1):
+            insert_step(
+                task_id,
+                str(step.get("agent_name", step.get("name", "Agent"))),
+                str(step.get("input", "")),
+                str(step.get("output", "")),
+                str(step.get("status", "completed")),
+                role=str(step.get("role", "")),
+                error=str(step.get("error", "")),
+                duration_ms=int(step.get("duration_ms", 0) or 0),
+                step_order=index,
+                conn=conn,
+            )
+        for case in tests:
+            insert_test_case(
+                task_id,
+                str(case.get("input", "")),
+                str(case.get("expected", "")),
+                str(case.get("actual", "")),
+                bool(case.get("passed", False)),
+                category=str(case.get("category", case.get("name", "normal"))),
+                duration_ms=int(case.get("duration_ms", 0) or 0),
+                error=str(case.get("error", "")),
+                conn=conn,
+            )
+        for attempt in repairs:
+            insert_execution_log(
+                task_id,
+                int(attempt.get("round", 0) or 0),
+                str(attempt.get("error", attempt.get("reason", ""))),
+                str(attempt.get("old_code", "")),
+                str(attempt.get("new_code", "")),
+                str(attempt.get("status", "")).lower() in {"passed", "success"},
+                duration_ms=int(attempt.get("duration_ms", 0) or 0),
+                conn=conn,
+            )
+
+
+def delete_task(task_id: str) -> None:
+    with get_conn() as conn:
         conn.execute("DELETE FROM tasks WHERE task_id=?", (task_id,))
-        conn.commit()
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        raise e
-    finally:
-        if conn:
-            conn.close()
 
-# 新增：写入执行修复日志（匹配文档修复记录需求）
-def insert_execution_log(task_id: str, repair_round: int, error_msg: str, old_code: str, new_code: str, repair_success: bool):
-    conn = None
-    try:
-        conn = get_conn()
-        c = conn.cursor()
-        now = datetime.now().isoformat()
-        c.execute('''
-        INSERT INTO execution_logs (task_id, repair_round, error_msg, old_code, new_code, repair_success, log_time)
-        VALUES (?,?,?,?,?,?,?)
-        ''', (task_id, repair_round, error_msg, old_code, new_code, repair_success, now))
-        conn.commit()
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        raise e
-    finally:
-        if conn:
-            conn.close()
 
-# 重写指标统计：补齐前端看板全部要求字段
 def calc_metrics() -> Dict[str, Any]:
-    conn = get_conn()
-    try:
-        c = conn.cursor()
-        # 1. 基础任务统计
-        total = c.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
-        status_stats = c.execute('''
-            SELECT status, COUNT(*) cnt FROM tasks GROUP BY status
-        ''').fetchall()
-        stat_map = {row["status"]: row["cnt"] for row in status_stats}
-        success = stat_map.get("completed", 0)
-        failed = stat_map.get("failed", 0)
-        running = stat_map.get("running", 0)
-        success_rate = round(success / total * 100, 2) if total > 0 else 0
+    with get_conn() as conn:
+        total = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+        status_rows = conn.execute(
+            "SELECT status, COUNT(*) AS count FROM tasks GROUP BY status"
+        ).fetchall()
+        status_map = {row["status"]: row["count"] for row in status_rows}
+        completed = status_map.get("completed", 0)
+        failed = status_map.get("failed", 0)
+        running = status_map.get("running", 0)
 
-        # 2. 平均响应时间 total_ms
-        all_task_data = c.execute("SELECT data FROM tasks").fetchall()
-        total_ms_sum = 0
-        task_with_time = 0
-        for item in all_task_data:
-            data = json.loads(item["data"])
-            ms = data.get("total_ms", 0)
-            if ms > 0:
-                total_ms_sum += ms
-                task_with_time += 1
-        avg_response_time = round(total_ms_sum / task_with_time, 2) if task_with_time > 0 else 0
-
-        # 3. 测试通过率
-        total_test = c.execute("SELECT COUNT(*) FROM test_cases").fetchone()[0]
-        pass_test = c.execute("SELECT COUNT(*) FROM test_cases WHERE passed=1").fetchone()[0]
-        test_pass_rate = round(pass_test / total_test * 100, 2) if total_test > 0 else 0
-
-        # 4. 代码运行成功率（execution_report.exit_code=0 视为运行成功）
+        task_rows = conn.execute(
+            "SELECT status, data FROM tasks"
+        ).fetchall()
+        durations: List[float] = []
         run_success = 0
-        for item in all_task_data:
-            data = json.loads(item["data"])
-            exit_code = data.get("execution_report", {}).get("exit_code", -1)
-            if exit_code == 0:
+        for row in task_rows:
+            data = json.loads(row["data"])
+            duration = float(data.get("total_ms", 0) or 0)
+            if duration > 0:
+                durations.append(duration)
+            report = data.get("execution_report", {})
+            if isinstance(report, dict) and report.get("exit_code") == 0:
                 run_success += 1
-        code_run_rate = round(run_success / total * 100, 2) if total > 0 else 0
 
-        # 5. 修复成功率
-        repair_total = c.execute("SELECT COUNT(*) FROM execution_logs").fetchone()[0]
-        repair_ok = c.execute("SELECT COUNT(*) FROM execution_logs WHERE repair_success=1").fetchone()[0]
-        repair_rate = round(repair_ok / repair_total * 100, 2) if repair_total > 0 else 0
+        test_total, test_passed = conn.execute(
+            """
+            SELECT COUNT(*), COALESCE(SUM(CASE WHEN passed=1 THEN 1 ELSE 0 END), 0)
+            FROM test_cases
+            """
+        ).fetchone()
+        repair_total, repair_passed = conn.execute(
+            """
+            SELECT COUNT(*),
+                   COALESCE(SUM(CASE WHEN repair_success=1 THEN 1 ELSE 0 END), 0)
+            FROM execution_logs
+            """
+        ).fetchone()
 
-        return {
-            "total_tasks": total,
-            "success_tasks": success,
-            "failed_tasks": failed,
-            "running_tasks": running,
-            "success_rate": success_rate,
-            "avg_response_time": avg_response_time,
-            "test_pass_rate": test_pass_rate,
-            "code_run_rate": code_run_rate,
-            "repair_rate": repair_rate
-        }
-    finally:
-        conn.close()
+    return {
+        "total_tasks": total,
+        "success_tasks": completed,
+        "failed_tasks": failed,
+        "running_tasks": running,
+        "success_rate": round(completed / total * 100, 2) if total else 0.0,
+        "avg_response_time": (
+            round(sum(durations) / len(durations), 2) if durations else 0.0
+        ),
+        "test_pass_rate": (
+            round(test_passed / test_total * 100, 2) if test_total else 0.0
+        ),
+        "code_run_rate": round(run_success / total * 100, 2) if total else 0.0,
+        "repair_rate": (
+            round(repair_passed / repair_total * 100, 2)
+            if repair_total
+            else 0.0
+        ),
+    }
+
+
+init_db()
