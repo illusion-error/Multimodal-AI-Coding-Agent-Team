@@ -113,6 +113,7 @@ class AgentResult:
     agent_steps: List[AgentStep]
     retrieved_templates: List[Dict[str, Any]]
     test_plan: str
+    test_cases: List[Dict[str, Any]]
     repair_attempts: List[Dict[str, Any]]
     api_used: bool
     fallback_used: bool
@@ -993,6 +994,58 @@ def execution_succeeded(execution_report: str) -> bool:
     )
 
 
+def agent_result_to_dict(result: AgentResult) -> Dict[str, Any]:
+    """将 AgentResult 转成后端、数据库和前端共用的 JSON 字典。
+
+    业务层始终返回 dataclass，API 层只通过这个函数做一次字段适配，
+    避免后端重复猜测属性名或把 AgentResult 当作 dict 使用。
+    """
+
+    steps = [
+        {
+            "agent_name": step.name,
+            "role": step.role,
+            "status": step.status,
+            "input": step.input_summary,
+            "output": step.output_summary,
+            "duration_ms": step.duration_ms,
+            "error": step.error,
+        }
+        for step in result.agent_steps
+    ]
+    execution_report = {
+        "status": "success" if execution_succeeded(result.execution_report) else "failed",
+        "exit_code": 0 if execution_succeeded(result.execution_report) else 1,
+        "stdout": result.execution_report,
+        "stderr": "" if execution_succeeded(result.execution_report) else result.execution_report,
+        "timeout": "超时" in (result.execution_report or ""),
+        "duration_ms": 0,
+        "raw": result.execution_report,
+    }
+    metrics = dict(result.metrics)
+    return {
+        "problem": result.problem,
+        "solution_markdown": result.solution_markdown,
+        "code": result.code,
+        "code_length": len(result.code),
+        "execution_report": execution_report,
+        "project_document": result.project_document,
+        "metrics": metrics,
+        "agent_steps": steps,
+        "retrieved_templates": list(result.retrieved_templates),
+        "rag_hits": list(result.retrieved_templates),
+        "test_plan": result.test_plan,
+        "test_cases": list(result.test_cases),
+        "repair_attempts": list(result.repair_attempts),
+        "api_call": result.api_used,
+        "api_used": result.api_used,
+        "fallback_used": result.fallback_used,
+        "error": result.error,
+        "total_ms": metrics.get("total_ms", 0),
+        "model_name": metrics.get("text_model", DEFAULT_TEXT_MODEL),
+    }
+
+
 def run_execution_debug_agent(
     config: AgentConfig,
     problem: str,
@@ -1473,6 +1526,7 @@ def solve_problem(
         agent_steps=agent_steps,
         retrieved_templates=retrieved_templates,
         test_plan=test_plan,
+        test_cases=test_cases,
         repair_attempts=repair_attempts,
         api_used=api_used,
         fallback_used=fallback_used,
