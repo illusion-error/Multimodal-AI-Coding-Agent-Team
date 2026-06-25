@@ -1,7 +1,9 @@
 __pycache__/
 *.py[cod]
 *$py.class
-/.env
+.env
+**/.env
+!.env.example
 .venv/
 venv/
 env/
@@ -11,3 +13,4 @@ env/
 *.log
 *.db
 backend/*.db
+*.bak
