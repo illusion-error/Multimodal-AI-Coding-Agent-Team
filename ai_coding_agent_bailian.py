@@ -938,42 +938,19 @@ def run_python_code(code: str, timeout_seconds: int) -> str:
     {exit_code, stdout, stderr, status, raw} 对象。
     """
 
-    risky = looks_dangerous(code)
-    if risky:
-        return (
-            "安全检查：检测到潜在高风险调用，已跳过本地执行。\n"
-            f"命中关键词：{', '.join(risky)}\n"
-            "你仍然可以查看生成代码和项目文档。"
-        )
+    from sandbox.code_runner import execute_code_safely
 
-    with tempfile.TemporaryDirectory(prefix="bailian_agent_") as temp_dir:
-        script_path = os.path.join(temp_dir, "solution.py")
-        with open(script_path, "w", encoding="utf-8") as file:
-            file.write(code)
-
-        env = os.environ.copy()
-        env["PYTHONIOENCODING"] = "utf-8"
-
-        try:
-            completed = subprocess.run(
-                [sys.executable, script_path],
-                cwd=temp_dir,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=max(1, int(timeout_seconds)),
-                env=env,
-            )
-        except subprocess.TimeoutExpired:
-            return f"执行超时：代码运行超过 {timeout_seconds} 秒，已停止。"
-        except Exception:
-            return "执行异常：\n" + traceback.format_exc()
-
-    stdout = (completed.stdout or "").strip()
-    stderr = (completed.stderr or "").strip()
+    completed = execute_code_safely(
+        code,
+        task_id="agent-execution",
+        timeout_seconds=timeout_seconds,
+    )
+    stdout = (completed["stdout"] or "").strip()
+    stderr = (completed["stderr"] or "").strip()
     pieces = [
-        f"退出码：{completed.returncode}",
+        f"状态：{completed['status']}",
+        f"退出码：{completed['exit_code']}",
+        f"耗时：{completed['duration_ms']} ms",
         f"标准输出：\n{stdout or '(无)'}",
     ]
     if stderr:
