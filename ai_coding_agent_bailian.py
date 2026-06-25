@@ -719,7 +719,11 @@ def offline_solution(problem: str, reason: str = "") -> str:
 
     normalized = problem.lower()
 
-    if "two sum" in normalized or "两数之和" in problem:
+    if (
+        "two sum" in normalized
+        or "两数之和" in problem
+        or ("target" in normalized and ("nums" in normalized or "下标" in problem))
+    ):
         code = r'''
 from typing import List
 
@@ -732,6 +736,9 @@ def two_sum(nums: List[int], target: int) -> List[int]:
             return [seen[need], i]
         seen[value] = i
     return []
+
+
+solution = two_sum
 
 
 def _run_tests() -> None:
@@ -757,6 +764,9 @@ if __name__ == "__main__":
 def is_palindrome(text: str) -> bool:
     filtered = [ch.lower() for ch in text if ch.isalnum()]
     return filtered == filtered[::-1]
+
+
+solution = is_palindrome
 
 
 def _run_tests() -> None:
@@ -788,6 +798,9 @@ def fibonacci(n: int) -> int:
     return a
 
 
+solution = fibonacci
+
+
 def _run_tests() -> None:
     tests = [(0, 0), (1, 1), (2, 1), (10, 55)]
     for value, expected in tests:
@@ -802,6 +815,71 @@ if __name__ == "__main__":
         title = "斐波那契数"
         idea = "用两个变量滚动保存前两项，避免递归带来的重复计算。"
         complexity = "时间复杂度 O(n)，空间复杂度 O(1)。"
+    elif (
+        "最大值" in problem
+        or "maximum" in normalized
+        or "max value" in normalized
+    ):
+        code = r'''
+from typing import List
+
+
+def solution(values: List[int]) -> int:
+    if not values:
+        raise ValueError("values must not be empty")
+    current = values[0]
+    for value in values[1:]:
+        if value > current:
+            current = value
+    return current
+
+
+def _run_tests() -> None:
+    tests = [
+        ([1, 9, 3, 7], 9),
+        ([-5, -1, -10], -1),
+        ([42], 42),
+    ]
+    for values, expected in tests:
+        result = solution(values)
+        assert result == expected, f"expected={expected}, got={result}"
+    print("全部自测通过：maximum")
+
+
+if __name__ == "__main__":
+    _run_tests()
+'''.strip()
+        title = "寻找数组最大值"
+        idea = "线性扫描数组并维护当前最大值。"
+        complexity = "时间复杂度 O(n)，空间复杂度 O(1)。"
+    elif (
+        "反转字符串" in problem
+        or "reverse string" in normalized
+        or ("反转" in problem and "字符串" in problem)
+    ):
+        code = r'''
+def solution(text: str) -> str:
+    return text[::-1]
+
+
+def _run_tests() -> None:
+    tests = [
+        ("hello", "olleh"),
+        ("abc", "cba"),
+        ("", ""),
+    ]
+    for value, expected in tests:
+        result = solution(value)
+        assert result == expected, f"expected={expected}, got={result}"
+    print("全部自测通过：reverse string")
+
+
+if __name__ == "__main__":
+    _run_tests()
+'''.strip()
+        title = "反转字符串"
+        idea = "使用 Python 切片从尾到头读取字符串。"
+        complexity = "时间复杂度 O(n)，空间复杂度 O(n)。"
     elif "sentiment" in normalized or "情感" in problem:
         code = r'''
 POSITIVE_WORDS = {"好", "优秀", "喜欢", "满意", "开心", "推荐", "love", "great", "good", "excellent"}
@@ -817,6 +895,9 @@ def analyze_sentiment(text: str) -> str:
     if negative > positive:
         return "negative"
     return "neutral"
+
+
+solution = analyze_sentiment
 
 
 def _run_tests() -> None:
@@ -849,6 +930,9 @@ def solve(*args: Any) -> str:
     请根据具体题目把这里替换为真实算法逻辑。
     """
     return "已生成兜底代码：请根据题目补充核心算法逻辑。"
+
+
+solution = solve
 
 
 def _run_tests() -> None:

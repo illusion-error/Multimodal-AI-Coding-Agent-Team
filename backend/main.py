@@ -23,6 +23,7 @@ from ai_coding_agent_bailian import (  # noqa: E402
 from backend.database import (  # noqa: E402
     create_task,
     get_execution_logs_by_task,
+    get_latest_benchmark_results,
     get_steps_by_task,
     get_task_by_id,
     get_tests_by_task,
@@ -367,6 +368,11 @@ async def rerun_task(
 @app.get("/api/metrics/summary")
 async def get_metrics_summary() -> dict:
     return api_response(calc_metrics())
+
+
+@app.get("/api/benchmark/results")
+async def get_benchmark_results() -> dict:
+    return api_response(get_latest_benchmark_results())
 
 
 @app.on_event("startup")

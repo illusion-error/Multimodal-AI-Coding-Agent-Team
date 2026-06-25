@@ -2,31 +2,56 @@
   {
     "task_id": "algo_001",
     "title": "两数之和",
-    "problem_text": "给定两个整数 a 和 b，请编写函数 solution(a, b) 返回它们的和。",
-    "test_cases": [{"input": "2, 3", "expected": "5"}, {"input": "-1, 1", "expected": "0"}]
+    "difficulty": "简单",
+    "category": "数组",
+    "problem_text": "给定整数数组 nums 和目标值 target，请返回两个数的下标，使它们的和等于 target。",
+    "test_cases": [
+      {"args": [[2, 7, 11, 15], 9], "expected": [0, 1], "category": "normal"},
+      {"args": [[3, 3], 6], "expected": [0, 1], "category": "duplicate"}
+    ]
   },
   {
     "task_id": "algo_002",
     "title": "斐波那契数列",
-    "problem_text": "编写函数 solution(n)，返回斐波那契数列的第 n 项（n从0开始，0返回0，1返回1）。",
-    "test_cases": [{"input": "5", "expected": "5"}, {"input": "10", "expected": "55"}]
+    "difficulty": "简单",
+    "category": "动态规划",
+    "problem_text": "编写函数 solution(n)，返回斐波那契数列的第 n 项，n 从 0 开始。",
+    "test_cases": [
+      {"args": [0], "expected": 0, "category": "boundary"},
+      {"args": [10], "expected": 55, "category": "normal"}
+    ]
   },
   {
     "task_id": "algo_003",
     "title": "判断回文字符串",
-    "problem_text": "编写函数 solution(s)，判断字符串 s 是否为回文串，是返回 True，否则返回 False。",
-    "test_cases": [{"input": "'abcdcba'", "expected": "True"}, {"input": "'hello'", "expected": "False"}]
+    "difficulty": "简单",
+    "category": "字符串",
+    "problem_text": "编写函数 solution(s)，忽略大小写和非字母数字字符，判断字符串是否为回文串。",
+    "test_cases": [
+      {"args": ["A man, a plan, a canal: Panama"], "expected": true, "category": "normal"},
+      {"args": ["race a car"], "expected": false, "category": "negative"}
+    ]
   },
   {
     "task_id": "algo_004",
     "title": "寻找数组最大值",
-    "problem_text": "编写函数 solution(arr)，返回给定整数列表 arr 中的最大值。",
-    "test_cases": [{"input": "[1, 9, 3, 7]", "expected": "9"}, {"input": "[-5, -1, -10]", "expected": "-1"}]
+    "difficulty": "简单",
+    "category": "数组",
+    "problem_text": "编写函数 solution(arr)，返回给定非空整数列表 arr 中的最大值。",
+    "test_cases": [
+      {"args": [[1, 9, 3, 7]], "expected": 9, "category": "normal"},
+      {"args": [[-5, -1, -10]], "expected": -1, "category": "negative"}
+    ]
   },
   {
     "task_id": "algo_005",
     "title": "反转字符串",
+    "difficulty": "简单",
+    "category": "字符串",
     "problem_text": "编写函数 solution(s)，返回字符串 s 的反转结果。",
-    "test_cases": [{"input": "'hello'", "expected": "'olleh'"}, {"input": "'abc'", "expected": "'cba'"}]
+    "test_cases": [
+      {"args": ["hello"], "expected": "olleh", "category": "normal"},
+      {"args": [""], "expected": "", "category": "boundary"}
+    ]
   }
 ]

@@ -100,6 +100,31 @@ def init_db() -> None:
                 FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS benchmark_runs (
+                run_id TEXT PRIMARY KEY,
+                started_at TEXT NOT NULL,
+                finished_at TEXT NOT NULL,
+                total INTEGER NOT NULL,
+                passed INTEGER NOT NULL,
+                pass_rate REAL NOT NULL,
+                avg_duration_ms REAL NOT NULL,
+                status TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS benchmark_results (
+                result_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                difficulty TEXT NOT NULL DEFAULT '',
+                category TEXT NOT NULL DEFAULT '',
+                passed INTEGER NOT NULL DEFAULT 0,
+                duration_ms INTEGER NOT NULL DEFAULT 0,
+                error TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY (run_id) REFERENCES benchmark_runs(run_id)
+                    ON DELETE CASCADE
+            );
+
             """
         )
 
@@ -136,6 +161,10 @@ def init_db() -> None:
                 ON test_cases(task_id, test_id);
             CREATE INDEX IF NOT EXISTS idx_logs_task_round
                 ON execution_logs(task_id, repair_round, log_id);
+            CREATE INDEX IF NOT EXISTS idx_benchmark_finished
+                ON benchmark_runs(finished_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_benchmark_results_run
+                ON benchmark_results(run_id, result_id);
             """
         )
 
@@ -524,6 +553,110 @@ def calc_metrics() -> Dict[str, Any]:
             if repair_total
             else 0.0
         ),
+    }
+
+
+def save_benchmark_run(
+    summary: Dict[str, Any],
+    details: Iterable[Dict[str, Any]],
+) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO benchmark_runs
+                (run_id, started_at, finished_at, total, passed, pass_rate,
+                 avg_duration_ms, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(run_id) DO UPDATE SET
+                started_at=excluded.started_at,
+                finished_at=excluded.finished_at,
+                total=excluded.total,
+                passed=excluded.passed,
+                pass_rate=excluded.pass_rate,
+                avg_duration_ms=excluded.avg_duration_ms,
+                status=excluded.status
+            """,
+            (
+                summary["run_id"],
+                summary["started_at"],
+                summary["finished_at"],
+                int(summary["total"]),
+                int(summary["passed"]),
+                float(summary["pass_rate"]),
+                float(summary["avg_duration"]),
+                str(summary.get("status", "completed")),
+            ),
+        )
+        conn.execute(
+            "DELETE FROM benchmark_results WHERE run_id=?",
+            (summary["run_id"],),
+        )
+        conn.executemany(
+            """
+            INSERT INTO benchmark_results
+                (run_id, task_id, title, difficulty, category, passed,
+                 duration_ms, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    summary["run_id"],
+                    str(item.get("id", item.get("task_id", ""))),
+                    str(item.get("title", "")),
+                    str(item.get("difficulty", "")),
+                    str(item.get("category", "")),
+                    int(bool(item.get("passed", False))),
+                    int(item.get("duration", item.get("duration_ms", 0)) or 0),
+                    str(item.get("error", "")),
+                )
+                for item in details
+            ],
+        )
+
+
+def get_latest_benchmark_results() -> Dict[str, Any]:
+    with get_conn() as conn:
+        run = conn.execute(
+            """
+            SELECT run_id, started_at, finished_at, total, passed, pass_rate,
+                   avg_duration_ms, status
+            FROM benchmark_runs
+            ORDER BY finished_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        if not run:
+            return {}
+        rows = conn.execute(
+            """
+            SELECT task_id, title, difficulty, category, passed, duration_ms, error
+            FROM benchmark_results
+            WHERE run_id=?
+            ORDER BY result_id
+            """,
+            (run["run_id"],),
+        ).fetchall()
+    return {
+        "run_id": run["run_id"],
+        "started_at": run["started_at"],
+        "finished_at": run["finished_at"],
+        "status": run["status"],
+        "total": run["total"],
+        "passed": run["passed"],
+        "pass_rate": run["pass_rate"],
+        "avg_duration": run["avg_duration_ms"],
+        "details": [
+            {
+                "id": row["task_id"],
+                "title": row["title"],
+                "difficulty": row["difficulty"],
+                "category": row["category"],
+                "passed": bool(row["passed"]),
+                "duration": row["duration_ms"],
+                "error": row["error"],
+            }
+            for row in rows
+        ],
     }
 
 

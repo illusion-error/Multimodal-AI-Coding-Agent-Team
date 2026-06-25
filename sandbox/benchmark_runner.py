@@ -1,67 +1,124 @@
-# sandbox/benchmark_runner.py
+from __future__ import annotations
+
+import argparse
 import json
-import sqlite3
-import time
 import os
-from .evaluator import run_test_cases
+import sys
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List
 
-def run_real_benchmark():
-    print("🚀 启动 Benchmark 真实自动化评测...")
-    
-    # 1. 真实读取本地题库
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    json_path = os.path.join(base_dir, 'benchmark_data.json')
-    try:
-        with open(json_path, 'r', encoding='utf-8') as f:
-            questions = json.load(f)
-    except FileNotFoundError:
-        print(f"❌ 找不到题库文件: {json_path}")
-        return
+from dotenv import load_dotenv
 
-    total_q = len(questions)
-    total_passed = 0
-    total_time_ms = 0
 
-    # 2. 真实遍历跑测每个用例
-    for q in questions:
-        print(f"正在跑测题目: {q['task_id']} ({q['title']})...")
-        
-        # 这里用一段最基础的模拟生成代码作为测试输入
-        mock_code = f"def solution(*args):\n    return {q['test_cases'][0]['expected']}"
-        
-        # 调用真实的评测机
-        res = run_test_cases(mock_code, q['test_cases'])
-        total_time_ms += res["total_time_ms"]
-        if res["failed"] == 0:
-            total_passed += 1
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+load_dotenv(PROJECT_ROOT / ".env")
 
-    pass_rate = (total_passed / total_q) * 100 if total_q > 0 else 0
-    avg_time_ms = total_time_ms / total_q if total_q > 0 else 0
+from ai_coding_agent_bailian import AgentConfig, agent_result_to_dict, solve_problem
+from backend.database import save_benchmark_run
+from sandbox.evaluator import run_auto_tests
 
-    print("-" * 50)
-    print(f"✅ 评测完毕！通过率: {pass_rate:.1f}%, 平均耗时: {avg_time_ms:.1f}ms")
 
-    # 3. 真实写入后端 tasks.db
-    db_path = os.path.join(base_dir, 'backend', 'tasks.db')
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        # 确保指标表存在
-        cursor.execute('''CREATE TABLE IF NOT EXISTS metrics (
-            task_id TEXT, metric_name TEXT, metric_value REAL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)''')
-        
-        # 写入真实测试结果
-        cursor.execute("INSERT INTO metrics (task_id, metric_name, metric_value) VALUES (?, ?, ?)",
-                       ("benchmark_run", "pass_rate", pass_rate))
-        cursor.execute("INSERT INTO metrics (task_id, metric_name, metric_value) VALUES (?, ?, ?)",
-                       ("benchmark_run", "avg_time_ms", avg_time_ms))
-        
-        conn.commit()
-        conn.close()
-        print("💾 评测指标已成功写入真实数据库！")
-    except Exception as e:
-        print(f"❌ 数据库写入失败: {e}")
+def load_questions(path: Path) -> List[Dict[str, Any]]:
+    with path.open("r", encoding="utf-8") as file:
+        questions = json.load(file)
+    if not isinstance(questions, list) or not questions:
+        raise ValueError("Benchmark 题库必须是非空数组")
+    return questions
+
+
+def run_benchmark(
+    *,
+    data_path: Path | None = None,
+    persist: bool = True,
+    api_key: str | None = None,
+) -> Dict[str, Any]:
+    questions = load_questions(data_path or PROJECT_ROOT / "benchmark_data.json")
+    started_at = datetime.now().isoformat(timespec="milliseconds")
+    run_id = str(uuid.uuid4())
+    details: List[Dict[str, Any]] = []
+
+    config = AgentConfig(
+        api_key=api_key if api_key is not None else os.getenv("DASHSCOPE_API_KEY", ""),
+        enable_local_execution=True,
+        enable_offline_fallback=True,
+    )
+
+    for question in questions:
+        task_id = str(question["task_id"])
+        title = str(question.get("title", task_id))
+        try:
+            result = solve_problem(
+                config=config,
+                text_problem=str(question["problem_text"]),
+            )
+            agent_data = agent_result_to_dict(result)
+            evaluation = run_auto_tests(
+                agent_data["code"],
+                list(question.get("test_cases", [])),
+                task_id=f"benchmark:{task_id}",
+            )
+            passed = evaluation["total"] > 0 and evaluation["failed"] == 0
+            errors = [
+                str(item["error"])
+                for item in evaluation["details"]
+                if item.get("error")
+            ]
+            duration_ms = int(
+                agent_data.get("total_ms", 0) + evaluation["total_time_ms"]
+            )
+            error = "; ".join(errors)
+        except Exception as exc:
+            passed = False
+            duration_ms = 0
+            error = f"{type(exc).__name__}: {exc}"
+
+        details.append(
+            {
+                "id": task_id,
+                "title": title,
+                "difficulty": str(question.get("difficulty", "")),
+                "category": str(question.get("category", "")),
+                "passed": passed,
+                "duration": duration_ms,
+                "error": error,
+            }
+        )
+
+    passed_count = sum(1 for item in details if item["passed"])
+    total_duration = sum(int(item["duration"]) for item in details)
+    total = len(details)
+    finished_at = datetime.now().isoformat(timespec="milliseconds")
+    summary: Dict[str, Any] = {
+        "run_id": run_id,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "status": "completed",
+        "total": total,
+        "passed": passed_count,
+        "pass_rate": round(passed_count / total * 100, 2) if total else 0.0,
+        "avg_duration": round(total_duration / total, 2) if total else 0.0,
+        "details": details,
+    }
+    if persist:
+        save_benchmark_run(summary, details)
+    return summary
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run the real Agent benchmark suite")
+    parser.add_argument(
+        "--no-persist",
+        action="store_true",
+        help="Run without writing results to SQLite",
+    )
+    args = parser.parse_args()
+    summary = run_benchmark(persist=not args.no_persist)
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
 
 if __name__ == "__main__":
-    run_real_benchmark()
+    main()
