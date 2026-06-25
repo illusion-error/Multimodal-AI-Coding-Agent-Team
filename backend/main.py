@@ -26,9 +26,13 @@ AGENT_AVAILABLE = False
 app = FastAPI(title="AI Coding Agent API", version="1.0.0")
 
 # CORS 配置
+# 读取跨域配置，多个域名用英文逗号分隔
+origins_str = os.getenv("ALLOW_ORIGINS", "*")
+allow_origins = origins_str.split(",") if origins_str != "*" else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allow_origins,
     allow_methods=["*"],
     allow_headers=["*"]
 )
@@ -442,4 +446,7 @@ async def startup_event():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # 从.env读取，没有则用默认值
+    host = os.getenv("SERVER_HOST", "0.0.0.0")
+    port = int(os.getenv("SERVER_PORT", 8000))
+    uvicorn.run(app, host=host, port=port)
