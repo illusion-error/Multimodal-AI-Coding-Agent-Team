@@ -3,8 +3,8 @@
   <div class="home-container">
     <h1>🧠 多模态代码生成 Agent</h1>
 
-    <!-- 控制栏：Prompt 版本选择 + 模型路由 -->
-    <div class="control-bar">
+    <!-- 控制栏：Prompt 版本选择 + 模型路由（第二阶段功能） -->
+    <div v-if="enableStage2" class="control-bar">
       <div class="control-group">
         <span class="control-label">Prompt 版本：</span>
         <el-select v-model="selectedPromptVersion" placeholder="选择版本" size="small" style="width: 140px">
@@ -78,13 +78,13 @@
       <!-- 部署信息卡片 -->
       <div class="deployment-cards">
         <el-row :gutter="16">
-          <el-col :span="4">
+          <el-col :span="6">
             <div class="deploy-card">
               <div class="deploy-label">总耗时</div>
               <div class="deploy-value">{{ result.total_ms || 0 }} <span class="deploy-unit">ms</span></div>
             </div>
           </el-col>
-          <el-col :span="4">
+          <el-col :span="6">
             <div class="deploy-card">
               <div class="deploy-label">API 调用</div>
               <div class="deploy-value">
@@ -94,7 +94,7 @@
               </div>
             </div>
           </el-col>
-          <el-col :span="4">
+          <el-col :span="6">
             <div class="deploy-card">
               <div class="deploy-label">兜底输出</div>
               <div class="deploy-value">
@@ -104,26 +104,10 @@
               </div>
             </div>
           </el-col>
-          <el-col :span="4">
+          <el-col :span="6">
             <div class="deploy-card">
               <div class="deploy-label">代码长度</div>
               <div class="deploy-value">{{ result.code_length || 0 }} <span class="deploy-unit">字符</span></div>
-            </div>
-          </el-col>
-          <el-col :span="4">
-            <div class="deploy-card">
-              <div class="deploy-label">使用模型</div>
-              <div class="deploy-value" style="font-size: 16px;">
-                <el-tag type="info" size="small">{{ result.model_name || '—' }}</el-tag>
-              </div>
-            </div>
-          </el-col>
-          <el-col :span="4">
-            <div class="deploy-card">
-              <div class="deploy-label">Prompt 版本</div>
-              <div class="deploy-value" style="font-size: 16px;">
-                <el-tag type="warning" size="small">{{ result.prompt_version || '—' }}</el-tag>
-              </div>
             </div>
           </el-col>
         </el-row>
@@ -175,13 +159,15 @@
           </div>
         </el-tab-pane>
 
-        <el-tab-pane label="Agent Timeline" name="timeline">
+        <!-- 第二阶段功能：Agent Timeline -->
+        <el-tab-pane v-if="enableStage2" label="Agent Timeline" name="timeline">
           <div class="tab-content">
             <AgentTimeline :steps="agentSteps" />
           </div>
         </el-tab-pane>
 
-        <el-tab-pane label="Trace 详情" name="trace">
+        <!-- 第二阶段功能：Trace 详情 -->
+        <el-tab-pane v-if="enableStage2" label="Trace 详情" name="trace">
           <div class="tab-content">
             <TraceDetail :trace-id="result.trace_id" :trace-data="traceData" />
           </div>
@@ -256,6 +242,9 @@ import {
 import AgentTimeline from '../components/AgentTimeline.vue'
 import TraceDetail from '../components/TraceDetail.vue'
 
+// 功能开关：是否启用第二阶段功能
+const enableStage2 = import.meta.env.VITE_ENABLE_STAGE2 === 'true'
+
 marked.setOptions({
   breaks: true,
   gfm: true
@@ -301,8 +290,9 @@ const codeLines = computed(() => {
   return lines.map((_, i) => i + 1)
 })
 
-// 加载 Prompt 版本列表
+// 加载 Prompt 版本列表（第二阶段功能）
 const loadPromptVersions = async () => {
+  if (!enableStage2) return
   try {
     const response = await getPromptVersions()
     if (response.data.code === 0) {
@@ -389,6 +379,7 @@ const fetchAgentSteps = async (id) => {
 }
 
 const fetchTraceData = async (id) => {
+  if (!enableStage2) return
   try {
     const response = await getTaskTrace(id)
     if (response.data.code === 0) {
@@ -411,7 +402,6 @@ const submitTask = async () => {
     return
   }
 
-  // 立即显示进度
   loading.value = true
   result.value = null
   agentSteps.value = []
@@ -446,7 +436,6 @@ const submitTask = async () => {
       const finalResult = await pollTaskStatus(taskId.value)
       
       finalResult.code_length = finalResult.code ? finalResult.code.length : 0
-      // 从后端读取 api_call，如果没有则默认为 true
       finalResult.api_call = finalResult.api_call ?? true
       finalResult.fallback_used = finalResult.fallback_used || false
       finalResult.notes = finalResult.notes || '请确保输入符合题目要求，代码在 Python 3.10+ 环境中运行。'
@@ -565,13 +554,19 @@ const handleRerun = async () => {
     const response = await rerunTask(taskId.value)
     if (response.data.code === 0) {
       ElMessage.success('已重新执行')
-      const finalResult = await pollTaskStatus(taskId.value)
+      
+      // ✅ 关键：获取新的 task_id
+      const newTaskId = response.data.data.task_id
+      taskId.value = newTaskId
+      
+      const finalResult = await pollTaskStatus(newTaskId)
       finalResult.code_length = finalResult.code ? finalResult.code.length : 0
       result.value = finalResult
       currentModel.value = finalResult.model_name || 'qwen-max'
+      
       await Promise.all([
-        fetchAgentSteps(taskId.value),
-        fetchTraceData(taskId.value)
+        fetchAgentSteps(newTaskId),
+        fetchTraceData(newTaskId)
       ])
     }
   } catch (error) {
@@ -582,7 +577,10 @@ const handleRerun = async () => {
   }
 }
 
-loadPromptVersions()
+// 仅当第二阶段启用时才加载 Prompt 版本
+if (enableStage2) {
+  loadPromptVersions()
+}
 
 onUnmounted(() => {
   if (progressTimer) {

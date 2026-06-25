@@ -15,8 +15,8 @@
       </el-col>
     </el-row>
 
-    <!-- Benchmark 图表 -->
-    <el-card class="benchmark-card">
+    <!-- Benchmark 图表（第二阶段功能） -->
+    <el-card v-if="enableStage2" class="benchmark-card">
       <BenchmarkCharts :data="benchmarkData" :loading="benchmarkLoading" @refresh="fetchBenchmarkData" />
     </el-card>
 
@@ -63,6 +63,9 @@ import { ElMessage } from 'element-plus'
 import { getMetricsSummary, getBenchmarkData, handleApiError } from '../api/task'
 import BenchmarkCharts from '../components/BenchmarkCharts.vue'
 
+// 功能开关：是否启用第二阶段功能
+const enableStage2 = import.meta.env.VITE_ENABLE_STAGE2 === 'true'
+
 const loading = ref(false)
 const benchmarkLoading = ref(false)
 const metrics = ref({})
@@ -101,6 +104,7 @@ const fetchMetrics = async () => {
 }
 
 const fetchBenchmarkData = async () => {
+  if (!enableStage2) return
   benchmarkLoading.value = true
   try {
     const response = await getBenchmarkData()
@@ -123,13 +127,17 @@ const fetchBenchmarkData = async () => {
 
 const refreshAll = () => {
   fetchMetrics()
-  fetchBenchmarkData()
+  if (enableStage2) {
+    fetchBenchmarkData()
+  }
   ElMessage.success('已刷新')
 }
 
 onMounted(() => {
   fetchMetrics()
-  fetchBenchmarkData()
+  if (enableStage2) {
+    fetchBenchmarkData()
+  }
 })
 </script>
 
