@@ -130,6 +130,55 @@ def init_db() -> None:
                     ON DELETE CASCADE
             );
 
+
+            CREATE TABLE IF NOT EXISTS prompt_versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                content TEXT NOT NULL,
+                is_enabled INTEGER DEFAULT 0,
+                change_log TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(agent_name, version)
+            );
+
+            CREATE TABLE IF NOT EXISTS trace_nodes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trace_id TEXT NOT NULL,
+                node_name TEXT NOT NULL,
+                node_type TEXT NOT NULL,
+                start_time TIMESTAMP,
+                end_time TIMESTAMP,
+                duration_ms INTEGER,
+                status TEXT,
+                error_message TEXT,
+                input_data TEXT,
+                output_data TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS tool_calls (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trace_id TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                tool_input TEXT,
+                tool_output TEXT,
+                start_time TIMESTAMP,
+                end_time TIMESTAMP,
+                duration_ms INTEGER,
+                status TEXT,
+                error_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS cache_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cache_key TEXT UNIQUE NOT NULL,
+                cache_value TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP
+            );
+
             """
         )
 
@@ -159,6 +208,13 @@ def init_db() -> None:
         _ensure_column(conn, "test_cases", "error TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "execution_logs", "duration_ms INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "execution_logs", "created_at TEXT NOT NULL DEFAULT ''")
+
+        _ensure_column(conn, "tasks", "trace_id TEXT")
+        _ensure_column(conn, "tasks", "prompt_version TEXT")
+        _ensure_column(conn, "tasks", "selected_model TEXT")
+        _ensure_column(conn, "tasks", "route_reason TEXT")
+        _ensure_column(conn, "tasks", "token_usage TEXT")
+        _ensure_column(conn, "tasks", "estimated_cost REAL")
 
         now = utc_now()
         conn.execute(
@@ -706,3 +762,131 @@ def get_latest_benchmark_results() -> Dict[str, Any]:
 
 
 init_db()
+
+# ========== 新增：Trace 相关函数 ==========
+
+import uuid
+
+def generate_trace_id() -> str:
+    """生成新的 trace_id"""
+    return str(uuid.uuid4())
+
+def insert_trace_node(
+    trace_id: str,
+    node_name: str,
+    node_type: str,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    duration_ms: Optional[int] = None,
+    status: str = 'pending',
+    error_message: Optional[str] = None,
+    input_data: Optional[Dict] = None,
+    output_data: Optional[Dict] = None
+) -> int:
+    """插入 trace 节点记录"""
+    with get_conn() as conn:
+        cursor = conn.execute('''
+            INSERT INTO trace_nodes 
+            (trace_id, node_name, node_type, start_time, end_time, duration_ms, 
+             status, error_message, input_data, output_data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            trace_id, node_name, node_type, start_time, end_time, duration_ms,
+            status, error_message,
+            json.dumps(input_data, ensure_ascii=False) if input_data else None,
+            json.dumps(output_data, ensure_ascii=False) if output_data else None
+        ))
+        return cursor.lastrowid
+
+def insert_tool_call(
+    trace_id: str,
+    tool_name: str,
+    tool_input: Optional[Dict] = None,
+    tool_output: Optional[Dict] = None,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    duration_ms: Optional[int] = None,
+    status: str = 'pending',
+    error_message: Optional[str] = None
+) -> int:
+    """插入工具调用记录"""
+    with get_conn() as conn:
+        cursor = conn.execute('''
+            INSERT INTO tool_calls 
+            (trace_id, tool_name, tool_input, tool_output, start_time, end_time, 
+             duration_ms, status, error_message)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            trace_id, tool_name,
+            json.dumps(tool_input, ensure_ascii=False) if tool_input else None,
+            json.dumps(tool_output, ensure_ascii=False) if tool_output else None,
+            start_time, end_time, duration_ms, status, error_message
+        ))
+        return cursor.lastrowid
+
+def get_trace_by_trace_id(trace_id: str) -> Dict[str, Any]:
+    """根据 trace_id 查询完整的 trace 数据"""
+    with get_conn() as conn:
+        # 获取任务信息
+        task = conn.execute(
+            'SELECT * FROM tasks WHERE trace_id = ?', (trace_id,)
+        ).fetchone()
+        
+        # 获取节点
+        nodes = conn.execute(
+            'SELECT * FROM trace_nodes WHERE trace_id = ? ORDER BY start_time, id',
+            (trace_id,)
+        ).fetchall()
+        
+        # 获取工具调用
+        tools = conn.execute(
+            'SELECT * FROM tool_calls WHERE trace_id = ? ORDER BY start_time, id',
+            (trace_id,)
+        ).fetchall()
+    
+    result = {
+        'task': dict(task) if task else None,
+        'nodes': [],
+        'tool_calls': []
+    }
+    
+    for node in nodes:
+        node_dict = dict(node)
+        # 解析 JSON 字段
+        if node_dict.get('input_data'):
+            try:
+                node_dict['input_data'] = json.loads(node_dict['input_data'])
+            except:
+                pass
+        if node_dict.get('output_data'):
+            try:
+                node_dict['output_data'] = json.loads(node_dict['output_data'])
+            except:
+                pass
+        result['nodes'].append(node_dict)
+    
+    for tool in tools:
+        tool_dict = dict(tool)
+        if tool_dict.get('tool_input'):
+            try:
+                tool_dict['tool_input'] = json.loads(tool_dict['tool_input'])
+            except:
+                pass
+        if tool_dict.get('tool_output'):
+            try:
+                tool_dict['tool_output'] = json.loads(tool_dict['tool_output'])
+            except:
+                pass
+        result['tool_calls'].append(tool_dict)
+    
+    return result
+
+def get_task_by_task_id_for_trace(task_id: str) -> Optional[Dict[str, Any]]:
+    """获取任务的 trace_id（用于 trace 查询）"""
+    with get_conn() as conn:
+        row = conn.execute(
+            'SELECT task_id, trace_id FROM tasks WHERE task_id = ?',
+            (task_id,)
+        ).fetchone()
+    return dict(row) if row else None
+

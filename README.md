@@ -209,3 +209,25 @@ SQLite 数据通过 `backend_data` 卷持久化。
 `failed`，页面仍会展示代码、Agent 步骤、失败用例和修复记录。
 
 第二阶段面向不可信代码时，应切换到 Docker Sandbox 或 E2B，并限制网络、CPU、内存、进程数和文件系统权限。
+
+## 接口字段说明
+
+| 接口路径 | 方法 | 功能 | 请求字段 | 响应字段 |
+|---------|------|------|---------|---------|
+| `/api/health` | GET | 健康检查 | 无 | `{status, agent_loaded, database, version}` |
+| `/api/tasks/text` | POST | 文本任务提交 | `{problem_text}` | `{task_id, status}` |
+| `/api/tasks/image` | POST | 图片任务提交 | `image`(文件), `supplement`(可选) | `{task_id, status, filename, size}` |
+| `/api/tasks` | GET | 获取所有任务列表 | 无 | `[{task_id, status, input_type, created_at, ...}]` |
+| `/api/tasks/{task_id}` | GET | 获取单个任务详情 | 路径: `task_id` | `{task_id, status, problem, data, ...}` |
+| `/api/tasks/{task_id}/steps` | GET | 获取 Agent 执行步骤 | 路径: `task_id` | `[{step_id, agent_name, status, input, output, duration_ms}]` |
+| `/api/tasks/{task_id}/tests` | GET | 获取测试用例结果 | 路径: `task_id` | `[{test_id, input, expected, actual, passed, ...}]` |
+| `/api/tasks/{task_id}/repairs` | GET | 获取修复记录 | 路径: `task_id` | `[{log_id, repair_round, error_msg, repair_success, ...}]` |
+| `/api/tasks/{task_id}/report` | GET | 下载任务报告(Markdown) | 路径: `task_id` | 返回 `.md` 文件 |
+| `/api/tasks/{task_id}/rerun` | POST | 重新执行任务 | 路径: `task_id` | `{task_id, status, original_task_id}` |
+| `/api/metrics/summary` | GET | 获取统计指标 | 无 | `{total_tasks, success_rate, avg_response_time, ...}` |
+| `/api/benchmark/results` | GET | 获取最近跑批结果 | 无 | `{run_id, total, passed, pass_rate, details, ...}` |
+| `/api/prompt/versions` | GET | 获取 Prompt 版本列表 | `agent_name`(可选) | `[{id, agent_name, version, is_enabled, change_log, created_at}]` |
+| `/api/prompt/version` | POST | 切换 Prompt 版本 | `{agent_name, version}` | `{agent_name, version}` |
+| `/api/tasks/{task_id}/trace` | GET | 获取任务执行追踪 | 路径: `task_id` | `{task, nodes: [...], tool_calls: [...]}` |
+| `/api/benchmark/runs` | POST | 启动跑批 | 无 | `{run_id, status}` |
+| `/api/benchmark/runs/{run_id}` | GET | 查询跑批状态 | 路径: `run_id` | `{run_id, status, progress, total, completed, failed}` |

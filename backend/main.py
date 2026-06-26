@@ -50,6 +50,11 @@ from backend.database import (  # noqa: E402
     calc_metrics,
     replace_task_artifacts,
     update_task,
+    generate_trace_id,          
+    get_trace_by_trace_id,      
+    get_task_by_task_id_for_trace,  
+    insert_trace_node,          
+    insert_tool_call         
 )
 
 
@@ -165,6 +170,22 @@ def run_agent_task(
 ) -> None:
     """Run the real five-Agent workflow and persist its complete result."""
 
+    # ===== 新增：获取 trace_id =====
+    from backend.database import utc_now  # 导入 utc_now
+    task_info = get_task_by_id(task_id)
+    trace_id = task_info.get("data", {}).get("trace_id", "") if task_info else ""
+    
+    # ===== 新增：记录 Agent 开始节点 =====
+    if trace_id:
+        insert_trace_node(
+            trace_id=trace_id,
+            node_name="Agent_Workflow_Start",
+            node_type="workflow",
+            status="running",
+            start_time=utc_now(),
+        )
+    # ===== 新增结束 =====
+
     try:
         result = solve_problem(
             config=build_agent_config(api_key_override),
@@ -172,6 +193,23 @@ def run_agent_task(
             image_bytes=image_bytes,
             image_mime=image_mime,
         )
+
+        # ===== 新增：记录 Agent 步骤 =====
+        if trace_id:
+            for idx, step in enumerate(result.agent_steps):
+                insert_trace_node(
+                    trace_id=trace_id,
+                    node_name=step.get("agent_name", f"Agent_{idx}"),
+                    node_type="agent",
+                    status=step.get("status", "completed"),
+                    start_time=utc_now(),
+                    end_time=utc_now(),
+                    duration_ms=step.get("duration_ms", 0),
+                    input_data={"input": step.get("input", "")},
+                    output_data={"output": step.get("output", "")},
+                    error_message=step.get("error", ""),
+                )
+        # ===== 新增结束 =====
 
         # ===== 调试：打印 Agent 返回的数据量 =====
         print(f"🔍 result.agent_steps: {len(result.agent_steps)}")
@@ -259,7 +297,31 @@ def run_agent_task(
             repairs=formatted_repairs,
         )
         update_task(task_id, final_status, data)
+        
+        # ===== 新增：记录完成节点 =====
+        if trace_id:
+            insert_trace_node(
+                trace_id=trace_id,
+                node_name="Agent_Workflow_Complete",
+                node_type="workflow",
+                status="completed",
+                end_time=utc_now(),
+            )
+        # ===== 新增结束 =====
+            
     except Exception as exc:
+        # ===== 新增：记录错误节点 =====
+        if trace_id:
+            insert_trace_node(
+                trace_id=trace_id,
+                node_name="Agent_Workflow_Error",
+                node_type="workflow",
+                status="failed",
+                error_message=str(exc),
+                end_time=utc_now(),
+            )
+        # ===== 新增结束 =====
+        
         error_data = {
             "task_id": task_id,
             "status": "failed",
@@ -283,12 +345,15 @@ def create_background_task(
     extra_data: Optional[Dict[str, Any]] = None,
 ) -> str:
     task_id = str(uuid.uuid4())
+    trace_id = generate_trace_id()  # 新增：生成 trace_id
+    
     initial_data: Dict[str, Any] = {
         "task_id": task_id,
         "status": "running",
         "problem": problem_text,
         "input_type": input_type,
         "notes": "任务已创建，正在执行多 Agent 工作流。",
+        "trace_id": trace_id,  # 新增：保存到 data 中
     }
     if extra_data:
         initial_data.update(extra_data)
@@ -535,6 +600,100 @@ async def get_benchmark_results() -> dict:
     return api_response(get_latest_benchmark_results())
 
 
+@app.get("/api/prompt/versions")
+async def get_prompt_versions(agent_name: str | None = None) -> dict:
+    """获取各 Agent 的版本列表"""
+    from backend.database import get_conn
+    
+    with get_conn() as conn:
+        if agent_name:
+            rows = conn.execute(
+                'SELECT * FROM prompt_versions WHERE agent_name = ? ORDER BY created_at DESC',
+                (agent_name,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                'SELECT * FROM prompt_versions ORDER BY agent_name, created_at DESC'
+            ).fetchall()
+    
+    return api_response([dict(row) for row in rows])
+
+
+class SwitchVersionRequest(BaseModel):
+    agent_name: str
+    version: str
+
+
+@app.post("/api/prompt/version")
+async def switch_prompt_version(request: SwitchVersionRequest) -> dict:
+    """切换指定 Agent 的版本"""
+    from backend.database import get_conn
+    
+    with get_conn() as conn:
+        # 先取消所有启用
+        conn.execute(
+            'UPDATE prompt_versions SET is_enabled = 0 WHERE agent_name = ?',
+            (request.agent_name,)
+        )
+        
+        # 启用指定版本
+        cursor = conn.execute(
+            'UPDATE prompt_versions SET is_enabled = 1 '
+            'WHERE agent_name = ? AND version = ?',
+            (request.agent_name, request.version)
+        )
+        
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="版本不存在")
+    
+    return api_response(
+        {"agent_name": request.agent_name, "version": request.version},
+        message=f"已切换到版本 {request.version}"
+    )
+
+
+@app.get("/api/tasks/{task_id}/trace")
+async def get_task_trace(task_id: str) -> dict:
+    """获取任务的完整 trace"""
+    from backend.database import get_task_by_task_id_for_trace, get_trace_by_trace_id
+    
+    task_info = get_task_by_task_id_for_trace(task_id)
+    if not task_info:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    trace_id = task_info.get("trace_id")
+    if not trace_id:
+        return api_response({"task": task_info, "nodes": [], "tool_calls": []})
+    
+    trace_data = get_trace_by_trace_id(trace_id)
+    return api_response(trace_data)
+
+
+@app.post("/api/benchmark/runs")
+async def start_benchmark_run() -> dict:
+    """启动跑批任务"""
+    run_id = str(uuid.uuid4())
+    # TODO: 后续实现真实的跑批逻辑
+    return api_response(
+        {"run_id": run_id, "status": "running"},
+        message="跑批任务已启动"
+    )
+
+
+@app.get("/api/benchmark/runs/{run_id}")
+async def get_benchmark_status(run_id: str) -> dict:
+    """获取跑批状态"""
+    # TODO: 后续接入真实状态
+    return api_response({
+        "run_id": run_id,
+        "status": "running",
+        "progress": 0,
+        "total": 100,
+        "completed": 0,
+        "failed": 0
+    })
+
+
 if __name__ == "__main__":
     import uvicorn
 
@@ -543,3 +702,4 @@ if __name__ == "__main__":
         host=os.getenv("SERVER_HOST", "0.0.0.0"),
         port=int(os.getenv("SERVER_PORT", "8000")),
     )
+
