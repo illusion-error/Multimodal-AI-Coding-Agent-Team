@@ -93,10 +93,12 @@ class SafetyVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
-        if node.attr.startswith("__"):
+        # 定义允许访问的、无害的魔术属性（白名单）
+        SAFE_MAGIC_ATTRS = {"__name__", "__doc__"}
+        
+        if node.attr.startswith("__") and node.attr not in SAFE_MAGIC_ATTRS:
             self.violations.append(f"禁止访问属性: {node.attr}")
         self.generic_visit(node)
-
 
 def validate_code(code_str: str) -> List[str]:
     try:
