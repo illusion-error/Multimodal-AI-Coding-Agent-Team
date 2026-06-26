@@ -107,6 +107,7 @@ def build_agent_config(api_key_override: str = "") -> AgentConfig:
     return AgentConfig(
         api_key=api_key_override.strip() or os.getenv("DASHSCOPE_API_KEY", "").strip(),
         request_timeout=int(os.getenv("AGENT_REQUEST_TIMEOUT", "60")),
+        max_retries=int(os.getenv("AGENT_MAX_RETRIES", "2")),
         execution_timeout=int(os.getenv("AGENT_EXECUTION_TIMEOUT", "8")),
         enable_local_execution=True,
         enable_offline_fallback=True,

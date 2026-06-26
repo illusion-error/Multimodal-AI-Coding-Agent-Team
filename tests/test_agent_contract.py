@@ -129,6 +129,49 @@ def test_hello_world_has_locked_contract_and_authoritative_expected_value():
     assert result.repair_attempts == []
 
 
+def test_authoritative_evaluator_ignores_model_written_self_tests():
+    problem = "write a simple hello world script"
+    contract = infer_problem_contract(problem)
+    cases = authoritative_test_cases(contract)
+    code = '''
+def solution():
+    return "Hello, World!"
+
+
+def _run_tests():
+    result = solution()
+    assert result == "Hello, World!", f"Expected str, got {type(result).__name__}"
+
+
+if __name__ == "__main__":
+    _run_tests()
+'''
+
+    (
+        final_code,
+        report,
+        repairs,
+        evaluated_cases,
+        api_used,
+        fallback_used,
+    ) = run_execution_debug_agent(
+        AgentConfig(api_key="", enable_offline_fallback=True),
+        problem,
+        code,
+        "trusted hello world case",
+        cases,
+        contract,
+    )
+
+    assert final_code == code
+    assert "自动测试通过率：100.0%" in report
+    assert repairs == []
+    assert len(evaluated_cases) == 1
+    assert evaluated_cases[0]["passed"] is True
+    assert api_used is False
+    assert fallback_used is False
+
+
 def test_placeholder_expected_is_rejected_for_generic_contract():
     contract = infer_problem_contract("implement a custom transformation")
     accepted, rejected = validate_model_test_cases(

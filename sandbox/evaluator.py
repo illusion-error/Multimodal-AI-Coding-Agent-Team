@@ -8,6 +8,7 @@ from sandbox.code_runner import execute_code_safely
 
 
 RESULT_PREFIX = "__AGENT_EVAL_RESULT__="
+SELF_TEST_FUNCTION_NAMES = {"_run_tests", "run_tests", "_test", "test", "main", "_main"}
 
 
 def _literal(value: Any) -> Any:
@@ -40,8 +41,9 @@ def build_test_script(
     kwargs: Dict[str, Any],
     expected: Any,
 ) -> str:
+    runtime_code = prepare_runtime_code(code_str)
     return f"""
-{code_str}
+{runtime_code}
 
 import json as _agent_json
 
@@ -64,6 +66,53 @@ except Exception as _agent_exc:
 
 print("{RESULT_PREFIX}" + _agent_json.dumps(_agent_payload, ensure_ascii=False))
 """.strip()
+
+
+def _is_main_guard(node: ast.AST) -> bool:
+    if not isinstance(node, ast.If):
+        return False
+    test = node.test
+    if not isinstance(test, ast.Compare):
+        return False
+    if not isinstance(test.left, ast.Name) or test.left.id != "__name__":
+        return False
+    if len(test.ops) != 1 or not isinstance(test.ops[0], ast.Eq):
+        return False
+    if len(test.comparators) != 1:
+        return False
+    comparator = test.comparators[0]
+    return isinstance(comparator, ast.Constant) and comparator.value == "__main__"
+
+
+def prepare_runtime_code(code_str: str) -> str:
+    """Keep solution/runtime definitions and remove model-written self tests.
+
+    Generated answers often include `_run_tests()` or `if __name__ == "__main__"`
+    blocks. Those snippets are useful for display, but they should not decide
+    authoritative grading. The evaluator appends its own trusted test harness, so
+    self-test blocks are stripped before sandbox validation.
+    """
+
+    try:
+        tree = ast.parse(code_str)
+    except SyntaxError:
+        return code_str
+
+    filtered_body: List[ast.stmt] = []
+    for node in tree.body:
+        if _is_main_guard(node):
+            continue
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name in SELF_TEST_FUNCTION_NAMES:
+                continue
+        filtered_body.append(node)
+
+    tree.body = filtered_body
+    ast.fix_missing_locations(tree)
+    try:
+        return ast.unparse(tree)
+    except Exception:
+        return code_str
 
 
 def _parse_result(stdout: str) -> Dict[str, Any]:

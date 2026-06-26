@@ -71,6 +71,7 @@ class AgentConfig:
     text_model: str = DEFAULT_TEXT_MODEL
     vision_model: str = DEFAULT_VISION_MODEL
     request_timeout: int = 60
+    max_retries: int = 2
     execution_timeout: int = 8
     enable_local_execution: bool = True
     enable_offline_fallback: bool = True
@@ -594,30 +595,47 @@ def call_bailian_chat(
         "temperature": temperature,
     }
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(
-        url=url,
-        data=data,
-        headers={
-            "Authorization": f"Bearer {config.api_key.strip()}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
+    attempts = max(1, int(getattr(config, "max_retries", 2)) + 1)
+    last_error = ""
 
-    try:
-        with urllib.request.urlopen(request, timeout=config.request_timeout) as response:
-            body = response.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"百炼接口返回 HTTP {exc.code}: {detail}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"无法连接百炼接口: {exc}") from exc
+    for attempt_index in range(attempts):
+        request = urllib.request.Request(
+            url=url,
+            data=data,
+            headers={
+                "Authorization": f"Bearer {config.api_key.strip()}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(
+                request,
+                timeout=config.request_timeout,
+            ) as response:
+                body = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            message = f"百炼接口返回 HTTP {exc.code}: {detail}"
+            should_retry = exc.code in {408, 429} or exc.code >= 500
+            if not should_retry or attempt_index == attempts - 1:
+                raise RuntimeError(message) from exc
+            last_error = message
+        except urllib.error.URLError as exc:
+            message = f"无法连接百炼接口: {exc}"
+            if attempt_index == attempts - 1:
+                raise RuntimeError(message) from exc
+            last_error = message
+        else:
+            try:
+                result = json.loads(body)
+                return result["choices"][0]["message"]["content"]
+            except Exception as exc:
+                raise RuntimeError(f"百炼响应解析失败: {body[:1000]}") from exc
 
-    try:
-        result = json.loads(body)
-        return result["choices"][0]["message"]["content"]
-    except Exception as exc:
-        raise RuntimeError(f"百炼响应解析失败: {body[:1000]}") from exc
+        time.sleep(min(2 ** attempt_index, 5))
+
+    raise RuntimeError(last_error or "百炼接口调用失败")
 
 
 def extract_problem_from_image(
@@ -1545,31 +1563,37 @@ def evaluate_python_code(
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """运行代码并逐条执行结构化测试用例。"""
 
+    if test_cases:
+        from sandbox.evaluator import run_auto_tests
+
+        auto_report = run_auto_tests(
+            code,
+            test_cases,
+            timeout_seconds=timeout_seconds,
+            task_id="agent-evaluation",
+        )
+        all_passed = (
+            auto_report["total"] > 0
+            and auto_report["passed"] == auto_report["total"]
+        )
+        execution_report = (
+            f"状态：{'success' if all_passed else 'failed'}\n\n"
+            f"退出码：{0 if all_passed else 1}\n\n"
+            "标准输出：\n"
+            f"系统权威测试：{auto_report['passed']}/{auto_report['total']}\n"
+            f"自动测试通过率：{auto_report['pass_rate']}%"
+        )
+        failed_messages = [
+            f"{item.get('name', '用例')}：{item.get('error') or item.get('actual')}"
+            for item in auto_report["details"]
+            if not item.get("passed")
+        ]
+        if failed_messages:
+            execution_report += "\n失败用例：\n- " + "\n- ".join(failed_messages)
+        return execution_report, auto_report["details"]
+
     execution_report = run_python_code(code, timeout_seconds)
-    if not execution_succeeded(execution_report) or not test_cases:
-        return execution_report, []
-
-    from sandbox.evaluator import run_auto_tests
-
-    auto_report = run_auto_tests(
-        code,
-        test_cases,
-        timeout_seconds=timeout_seconds,
-        task_id="agent-evaluation",
-    )
-    execution_report += (
-        "\n\n"
-        f"自动测试：{auto_report['passed']}/{auto_report['total']}\n"
-        f"自动测试通过率：{auto_report['pass_rate']}%"
-    )
-    failed_messages = [
-        f"{item.get('name', '用例')}：{item.get('error') or item.get('actual')}"
-        for item in auto_report["details"]
-        if not item.get("passed")
-    ]
-    if failed_messages:
-        execution_report += "\n失败用例：\n- " + "\n- ".join(failed_messages)
-    return execution_report, auto_report["details"]
+    return execution_report, []
 
 
 def trusted_test_cases(test_cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
