@@ -35,10 +35,11 @@ def run_benchmark(
     data_path: Path | None = None,
     persist: bool = True,
     api_key: str | None = None,
+    run_id: str | None = None,  
 ) -> Dict[str, Any]:
     questions = load_questions(data_path or PROJECT_ROOT / "benchmark_data.json")
     started_at = datetime.now().isoformat(timespec="milliseconds")
-    run_id = str(uuid.uuid4())
+    run_id = run_id or str(uuid.uuid4())  
     details: List[Dict[str, Any]] = []
 
     config = AgentConfig(

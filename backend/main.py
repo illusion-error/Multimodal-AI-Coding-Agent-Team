@@ -183,7 +183,7 @@ def run_agent_task(
     
     # ===== 新增：如果存在启用的版本，打印日志 =====
     if prompt_versions:
-        print(f"🔍 任务 {task_id} 使用 Prompt 版本: {prompt_versions}")
+        print(f"[INFO] Task {task_id} using Prompt versions: {prompt_versions}")
     # ===== 新增结束 =====
     
     # ===== 新增：记录 Agent 开始节点 =====
@@ -230,11 +230,11 @@ def run_agent_task(
         # ===== 新增结束 =====
 
         # ===== 调试：打印 Agent 返回的数据量 =====
-        print(f"🔍 result.agent_steps: {len(result.agent_steps)}")
-        print(f"🔍 result.test_cases: {len(result.test_cases)}")
-        print(f"🔍 result.repair_attempts: {len(result.repair_attempts)}")
+        print(f"[DEBUG] result.agent_steps: {len(result.agent_steps)}")
+        print(f"[DEBUG] result.test_cases: {len(result.test_cases)}")
+        print(f"[DEBUG] result.repair_attempts: {len(result.repair_attempts)}")
         if result.agent_steps:
-            print(f"🔍 第一条step示例: {result.agent_steps[0]}")
+            print(f"[DEBUG] First step example: {result.agent_steps[0]}")
         # ===== 调试结束 =====
 
         existing_task = get_task_by_id(task_id)  
@@ -304,9 +304,9 @@ def run_agent_task(
         formatted_tests = raw_tests
         formatted_repairs = raw_repairs
         
-        print(f"🔍 formatted_steps: {len(formatted_steps)}")
-        print(f"🔍 formatted_tests: {len(formatted_tests)}")
-        print(f"🔍 formatted_repairs: {len(formatted_repairs)}")
+        print(f"[DEBUG] formatted_steps: {len(formatted_steps)}")
+        print(f"[DEBUG] formatted_tests: {len(formatted_tests)}")
+        print(f"[DEBUG] formatted_repairs: {len(formatted_repairs)}")
         
         replace_task_artifacts(
             task_id,
@@ -714,10 +714,11 @@ async def start_benchmark_run(background_tasks: BackgroundTasks) -> dict:
                 data_path=PROJECT_ROOT / "benchmark_data.json",
                 persist=True,
                 api_key=os.getenv("DASHSCOPE_API_KEY", ""),
+                run_id=run_id,
             )
-            print(f"✅ Benchmark {run_id} 完成: {summary['passed']}/{summary['total']} 通过")
+            print(f"[INFO] Benchmark {run_id} completed: {summary['passed']}/{summary['total']} passed")
         except Exception as e:
-            print(f"❌ Benchmark {run_id} 失败: {e}")
+            print(f"[ERROR] Benchmark {run_id} failed: {e}")
     
     # 使用后台线程执行
     thread = threading.Thread(target=run_benchmark_task)
