@@ -231,3 +231,155 @@ SQLite 数据通过 `backend_data` 卷持久化。
 | `/api/tasks/{task_id}/trace` | GET | 获取任务执行追踪 | 路径: `task_id` | `{task, nodes: [...], tool_calls: [...]}` |
 | `/api/benchmark/runs` | POST | 启动跑批 | 无 | `{run_id, status}` |
 | `/api/benchmark/runs/{run_id}` | GET | 查询跑批状态 | 路径: `run_id` | `{run_id, status, progress, total, completed, failed}` |
+
+## 接口请求/响应 JSON 示例
+
+以下示例展示部分接口的典型请求与响应格式。
+
+### 1. POST /api/prompt/version
+
+请求示例：
+
+```json
+{
+  "agent_name": "CodeGenerator",
+  "version": "v2.0"
+}
+```
+
+响应示例（成功）：
+
+```json
+{
+  "code": 0,
+  "message": "已切换到版本 v2.0",
+  "data": {
+    "agent_name": "CodeGenerator",
+    "version": "v2.0"
+  }
+}
+```
+
+响应示例（版本不存在）：
+
+```json
+{
+  "code": 404,
+  "message": "版本不存在",
+  "data": null
+}
+```
+
+### 2. GET /api/tasks/{task_id}/trace
+
+响应示例（存在 Trace 数据）：
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "task": {
+      "task_id": "abc-123-def",
+      "trace_id": "trace-456"
+    },
+    "nodes": [
+      {
+        "id": 1,
+        "node_name": "Agent_Workflow_Start",
+        "node_type": "workflow",
+        "status": "running",
+        "start_time": "2026-06-27T00:00:00.000",
+        "end_time": null,
+        "duration_ms": null
+      },
+      {
+        "id": 2,
+        "node_name": "Planner",
+        "node_type": "agent",
+        "status": "completed",
+        "start_time": "2026-06-27T00:00:01.000",
+        "end_time": "2026-06-27T00:00:02.000",
+        "duration_ms": 1000
+      }
+    ],
+    "tool_calls": []
+  }
+}
+```
+
+响应示例（任务不存在）：
+
+```json
+{
+  "code": 404,
+  "message": "任务不存在",
+  "data": null
+}
+```
+
+### 3. POST /api/benchmark/runs
+
+响应示例：
+
+```json
+{
+  "code": 0,
+  "message": "跑批任务已启动",
+  "data": {
+    "run_id": "f1501a36-1234-5678-9abc-def012345678",
+    "status": "running"
+  }
+}
+```
+
+### 4. GET /api/benchmark/runs/{run_id}
+
+响应示例（running 状态）：
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "run_id": "f1501a36-1234-5678-9abc-def012345678",
+    "status": "running",
+    "progress": 0,
+    "total": 5,
+    "completed": 0,
+    "failed": 0,
+    "passed": 0
+  }
+}
+```
+
+响应示例（completed 状态）：
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "run_id": "f1501a36-1234-5678-9abc-def012345678",
+    "status": "completed",
+    "progress": 100,
+    "total": 5,
+    "passed": 5,
+    "failed": 0,
+    "pass_rate": 100.0,
+    "avg_duration": 1500.5,
+    "started_at": "2026-06-27T00:00:00.000",
+    "finished_at": "2026-06-27T00:06:00.000"
+  }
+}
+```
+
+响应示例（跑批记录不存在）：
+
+```json
+{
+  "code": 404,
+  "message": "跑批记录不存在",
+  "data": null
+}
+```

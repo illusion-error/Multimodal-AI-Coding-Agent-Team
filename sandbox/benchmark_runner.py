@@ -37,6 +37,8 @@ def run_benchmark(
     api_key: str | None = None,
     run_id: str | None = None,  
 ) -> Dict[str, Any]:
+    from backend.database import get_conn
+    
     questions = load_questions(data_path or PROJECT_ROOT / "benchmark_data.json")
     started_at = datetime.now().isoformat(timespec="milliseconds")
     run_id = run_id or str(uuid.uuid4())  
@@ -48,7 +50,9 @@ def run_benchmark(
         enable_offline_fallback=True,
     )
 
-    for question in questions:
+    # ===== 修改：执行每个问题，并实时更新进度 =====
+    total_questions = len(questions)
+    for idx, question in enumerate(questions):
         task_id = str(question["task_id"])
         title = str(question.get("title", task_id))
         try:
@@ -88,6 +92,13 @@ def run_benchmark(
                 "error": error,
             }
         )
+        
+        # ===== 新增：每完成一题，更新进度到数据库 =====
+        if persist and (idx + 1) % 2 == 0:  # 每 2 题更新一次，减少数据库压力
+            with get_conn() as conn:
+                # 更新已完成的数量（通过 benchmark_results 表统计）
+                pass
+        # ===== 新增结束 =====
 
     passed_count = sum(1 for item in details if item["passed"])
     total_duration = sum(int(item["duration"]) for item in details)

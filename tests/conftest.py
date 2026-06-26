@@ -29,13 +29,14 @@ from backend.main import app  # noqa: E402
 def clean_database():
     init_db()
     with get_conn() as conn:
+        conn.execute("DELETE FROM benchmark_results")
         conn.execute("DELETE FROM benchmark_runs")
         conn.execute("DELETE FROM tasks")
     yield
 
 
 @pytest.fixture()
-def client() -> TestClient:
+def client():
     with TestClient(app, raise_server_exceptions=True) as test_client:
         yield test_client
 

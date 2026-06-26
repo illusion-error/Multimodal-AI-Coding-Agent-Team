@@ -678,32 +678,58 @@ def save_benchmark_run(
     details: Iterable[Dict[str, Any]],
 ) -> None:
     with get_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO benchmark_runs
-                (run_id, started_at, finished_at, total, passed, pass_rate,
-                 avg_duration_ms, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(run_id) DO UPDATE SET
-                started_at=excluded.started_at,
-                finished_at=excluded.finished_at,
-                total=excluded.total,
-                passed=excluded.passed,
-                pass_rate=excluded.pass_rate,
-                avg_duration_ms=excluded.avg_duration_ms,
-                status=excluded.status
-            """,
-            (
-                summary["run_id"],
-                summary["started_at"],
-                summary["finished_at"],
-                int(summary["total"]),
-                int(summary["passed"]),
-                float(summary["pass_rate"]),
-                float(summary["avg_duration"]),
-                str(summary.get("status", "completed")),
-            ),
-        )
+        # 检查记录是否存在
+        existing = conn.execute(
+            "SELECT run_id FROM benchmark_runs WHERE run_id = ?",
+            (summary["run_id"],)
+        ).fetchone()
+        
+        if existing:
+            # 记录已存在（由 POST 创建），使用 UPDATE
+            conn.execute(
+                """
+                UPDATE benchmark_runs
+                SET started_at = ?,
+                    finished_at = ?,
+                    total = ?,
+                    passed = ?,
+                    pass_rate = ?,
+                    avg_duration_ms = ?,
+                    status = ?
+                WHERE run_id = ?
+                """,
+                (
+                    summary["started_at"],
+                    summary["finished_at"],
+                    int(summary["total"]),
+                    int(summary["passed"]),
+                    float(summary["pass_rate"]),
+                    float(summary["avg_duration"]),
+                    str(summary.get("status", "completed")),
+                    summary["run_id"],
+                )
+            )
+        else:
+            # 记录不存在（直接调用 run_benchmark），使用 INSERT
+            conn.execute(
+                """
+                INSERT INTO benchmark_runs
+                    (run_id, started_at, finished_at, total, passed, pass_rate,
+                     avg_duration_ms, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    summary["run_id"],
+                    summary["started_at"],
+                    summary["finished_at"],
+                    int(summary["total"]),
+                    int(summary["passed"]),
+                    float(summary["pass_rate"]),
+                    float(summary["avg_duration"]),
+                    str(summary.get("status", "completed")),
+                )
+            )
+        
         conn.execute(
             "DELETE FROM benchmark_results WHERE run_id=?",
             (summary["run_id"],),

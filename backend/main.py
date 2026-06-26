@@ -704,9 +704,24 @@ async def get_task_trace(task_id: str) -> dict:
 async def start_benchmark_run(background_tasks: BackgroundTasks) -> dict:
     """启动跑批任务"""
     from sandbox.benchmark_runner import run_benchmark
+    from backend.database import get_conn
     import threading
+    from datetime import datetime
     
     run_id = str(uuid.uuid4())
+    now = datetime.now().isoformat(timespec="milliseconds")
+    
+    # ===== 新增：立即插入 running 记录 =====
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO benchmark_runs 
+            (run_id, started_at, finished_at, total, passed, pass_rate, avg_duration_ms, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (run_id, now, now, 0, 0, 0.0, 0.0, "running")
+        )
+    # ===== 新增结束 =====
     
     def run_benchmark_task():
         try:
@@ -719,6 +734,17 @@ async def start_benchmark_run(background_tasks: BackgroundTasks) -> dict:
             print(f"[INFO] Benchmark {run_id} completed: {summary['passed']}/{summary['total']} passed")
         except Exception as e:
             print(f"[ERROR] Benchmark {run_id} failed: {e}")
+            # ===== 新增：失败时更新状态 =====
+            with get_conn() as conn:
+                conn.execute(
+                    """
+                    UPDATE benchmark_runs 
+                    SET status = 'failed', finished_at = ?
+                    WHERE run_id = ?
+                    """,
+                    (datetime.now().isoformat(timespec="milliseconds"), run_id)
+                )
+            # ===== 新增结束 =====
     
     # 使用后台线程执行
     thread = threading.Thread(target=run_benchmark_task)
