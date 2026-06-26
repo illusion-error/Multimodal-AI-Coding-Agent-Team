@@ -200,6 +200,7 @@ def run_agent_task(
     try:
         # ===== 修改：构建 config 并传入 prompt_versions =====
         config = build_agent_config(api_key_override)
+        config.trace_id = trace_id
         # ===== 新增：将 prompt_versions 传给 config =====
         if prompt_versions:
             config.prompt_versions = prompt_versions

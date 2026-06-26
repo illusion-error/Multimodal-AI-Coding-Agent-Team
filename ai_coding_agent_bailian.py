@@ -51,6 +51,11 @@ import urllib.request
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from agent.rag import RAG_TEMPLATES, hybrid_retrieve
+from agent.state import WorkflowState, WorkflowStatus
+from agent.tools import create_default_registry
+from agent.workflow import reflect_on_result
+
 
 DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 DEFAULT_TEXT_MODEL = "qwen-plus"
@@ -76,6 +81,7 @@ class AgentConfig:
     enable_local_execution: bool = True
     enable_offline_fallback: bool = True
     prompt_versions: dict = None  # 新增：保存各 Agent 的 Prompt 版本
+    trace_id: str = ""
 
 
 @dataclass
@@ -498,7 +504,12 @@ ALGORITHM_TEMPLATES: List[Dict[str, Any]] = [
 ]
 
 
+ALGORITHM_TEMPLATES = RAG_TEMPLATES
+
+
 def retrieve_algorithm_templates(problem: str, top_k: int = 3) -> List[Dict[str, Any]]:
+    return hybrid_retrieve(problem, top_k=top_k)
+
     """根据题目关键词检索最相关的算法模板。
 
     这是本项目的“轻量 RAG”。流程很直观：
@@ -2006,10 +2017,19 @@ def solve_problem(
     test_cases: List[Dict[str, Any]] = []
     repair_attempts: List[Dict[str, Any]] = []
 
+    trace_id = getattr(config, "trace_id", "") or ""
+    workflow_state = WorkflowState(trace_id=trace_id)
+    tool_registry = create_default_registry(trace_id=trace_id, persist=True)
+
     prompt_versions = getattr(config, "prompt_versions", None) or {}
 
     input_type = "text"
     problem = (text_problem or "").strip()
+    workflow_state.apply_patch(
+        node="workflow_start",
+        to_status=WorkflowStatus.CREATED,
+        patch={"problem": problem, "input_type": input_type},
+    )
 
     if looks_like_corrupted_text(problem):
         raise ValueError(
@@ -2060,10 +2080,25 @@ def solve_problem(
             status="completed",
         )
     )
+    workflow_state.apply_patch(
+        node="problem_recognition",
+        to_status=WorkflowStatus.RECOGNIZED,
+        patch={
+            "problem": problem,
+            "input_type": input_type,
+            "contract": contract,
+        },
+    )
 
     # 轻量 RAG：在生成任何代码前先检索算法模板。
     # 检索结果会进入解题规划 Agent 和代码生成 Agent，减少模型“凭空写”。
-    retrieved_templates = retrieve_algorithm_templates(problem)
+    rag_output = tool_registry.call("rag_search", {"problem": problem, "top_k": 5})
+    retrieved_templates = rag_output.get("results", []) or retrieve_algorithm_templates(problem)
+    workflow_state.apply_patch(
+        node="rag_retrieval",
+        to_status=WorkflowStatus.RETRIEVED,
+        patch={"templates": retrieved_templates},
+    )
 
     # Agent 2：解题规划。
     # 这一阶段只负责想清楚算法路线，不直接生成代码。
@@ -2104,6 +2139,12 @@ def solve_problem(
             error=planning_error,
         )
     )
+    workflow_state.apply_patch(
+        node="solution_planning",
+        to_status=WorkflowStatus.PLANNED,
+        patch={"plan": plan_markdown},
+        error=planning_error if planning_status == "failed" else "",
+    )
 
     # Agent 3：测试生成。
     step_started = now_ms()
@@ -2114,7 +2155,7 @@ def solve_problem(
             version_info = "\n\n## 当前生效的 Prompt 版本\n" + "\n".join(
                 f"- {agent}: {version}" for agent, version in prompt_versions.items()
             )
-        effective_problem_for_tests = problem + version_info
+            effective_problem_for_tests = problem + version_info
     
         test_plan, test_cases, used = generate_tests_with_bailian(
             config,
@@ -2143,6 +2184,12 @@ def solve_problem(
             status=test_status,
             error=test_error,
         )
+    )
+    workflow_state.apply_patch(
+        node="test_design",
+        to_status=WorkflowStatus.TESTS_DESIGNED,
+        patch={"test_plan": test_plan, "test_cases": test_cases},
+        error=test_error if test_status == "failed" else "",
     )
 
     # Agent 4：代码生成。
@@ -2210,9 +2257,20 @@ def solve_problem(
             error=generation_error,
         )
     )
+    workflow_state.apply_patch(
+        node="code_generation",
+        to_status=WorkflowStatus.GENERATED,
+        patch={"solution_markdown": solution_markdown, "code": code},
+        error=generation_error if generation_status == "failed" else "",
+    )
 
     # Agent 5：执行调试。
     step_started = now_ms()
+    workflow_state.apply_patch(
+        node="execution_debug",
+        to_status=WorkflowStatus.EXECUTING,
+        patch={"code": code},
+    )
     (
         final_code,
         execution_report,
@@ -2246,6 +2304,44 @@ def solve_problem(
         )
     else:
         semantic_verification_status = "manual_review"
+
+    reflect_decision = reflect_on_result(
+        execution_success=execution_succeeded(execution_report),
+        semantic_status=semantic_verification_status,
+        error_text=execution_report,
+        repair_attempt_count=len(repair_attempts),
+        max_repairs=3,
+        problem=problem,
+    )
+    workflow_state.apply_patch(
+        node="reflection",
+        to_status=WorkflowStatus.REFLECTING,
+        patch={
+            "code": code,
+            "execution_report": execution_report,
+            "test_cases": test_cases,
+            "repair_attempts": repair_attempts,
+            "semantic_status": semantic_verification_status,
+            "reflect_decision": reflect_decision.decision,
+        },
+    )
+    if repair_attempts:
+        workflow_state.apply_patch(
+            node="repair_loop",
+            to_status=WorkflowStatus.REPAIRING,
+            patch={"repair_attempts": repair_attempts, "code": code},
+        )
+    workflow_final_status = (
+        WorkflowStatus.COMPLETED
+        if execution_succeeded(execution_report)
+        and semantic_verification_status in {"verified", "manual_review"}
+        else WorkflowStatus.FAILED
+    )
+    workflow_state.apply_patch(
+        node="workflow_finish",
+        to_status=workflow_final_status,
+        patch={},
+    )
 
     agent_steps.append(
         build_step(
@@ -2281,6 +2377,11 @@ def solve_problem(
         "trusted_test_count": len(trusted_cases),
         "advisory_test_count": advisory_test_count,
         "prompt_versions": prompt_versions,  
+        "workflow_status": workflow_state.status,
+        "workflow_transitions": workflow_state.to_dict()["transitions"],
+        "reflect_decision": reflect_decision.to_dict(),
+        "rag_template_total": len(RAG_TEMPLATES),
+        "tool_registry": tool_registry.summary(),
     }
     document = build_project_document(
         problem=problem,
@@ -2295,6 +2396,8 @@ def solve_problem(
         test_plan=test_plan,
         repair_attempts=repair_attempts,
     )
+    tool_registry.call("report_generate", {"report": document})
+    metrics["tool_registry"] = tool_registry.summary()
     return AgentResult(
         problem=problem,
         solution_markdown=solution_markdown,
