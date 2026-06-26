@@ -44,8 +44,30 @@ def test_start_benchmark():
 
 def test_get_benchmark_status():
     """测试获取跑批状态"""
-    response = client.get("/api/benchmark/runs/test-run-id")
+    # 先创建一个真实的 benchmark run
+    from backend.database import save_benchmark_run
+    
+    run_id = "test-run-id-123"
+    summary = {
+        "run_id": run_id,
+        "started_at": "2024-01-01T00:00:00.000",
+        "finished_at": "2024-01-01T00:01:00.000",
+        "total": 10,
+        "passed": 8,
+        "pass_rate": 80.0,
+        "avg_duration": 1500.0,
+        "status": "completed",
+    }
+    details = [
+        {"id": "1", "title": "测试题1", "difficulty": "easy", "category": "basic", "passed": True, "duration": 1000, "error": ""},
+        {"id": "2", "title": "测试题2", "difficulty": "medium", "category": "normal", "passed": False, "duration": 2000, "error": "超时"},
+    ]
+    save_benchmark_run(summary, details)
+    
+    # 然后查询这个 run_id
+    response = client.get(f"/api/benchmark/runs/{run_id}")
     assert response.status_code == 200
     data = response.json()
-    assert data['code'] == 0
-    assert data['data']['run_id'] == 'test-run-id'
+    assert data["code"] == 0
+    assert data["data"]["run_id"] == run_id
+    assert data["data"]["status"] == "completed"

@@ -170,10 +170,21 @@ def run_agent_task(
 ) -> None:
     """Run the real five-Agent workflow and persist its complete result."""
 
-    # ===== 新增：获取 trace_id =====
-    from backend.database import utc_now  # 导入 utc_now
+    # ===== 修改：获取 trace_id 和 prompt_versions =====
+    from backend.database import utc_now, get_conn
     task_info = get_task_by_id(task_id)
     trace_id = task_info.get("data", {}).get("trace_id", "") if task_info else ""
+    
+    # ===== 新增：读取任务中保存的 Prompt 版本 =====
+    prompt_versions = {}
+    if task_info:
+        data = task_info.get("data", {})
+        prompt_versions = data.get("prompt_versions", {})
+    
+    # ===== 新增：如果存在启用的版本，打印日志 =====
+    if prompt_versions:
+        print(f"🔍 任务 {task_id} 使用 Prompt 版本: {prompt_versions}")
+    # ===== 新增结束 =====
     
     # ===== 新增：记录 Agent 开始节点 =====
     if trace_id:
@@ -187,8 +198,15 @@ def run_agent_task(
     # ===== 新增结束 =====
 
     try:
+        # ===== 修改：构建 config 并传入 prompt_versions =====
+        config = build_agent_config(api_key_override)
+        # ===== 新增：将 prompt_versions 传给 config =====
+        if prompt_versions:
+            config.prompt_versions = prompt_versions
+        # ===== 新增结束 =====
+        
         result = solve_problem(
-            config=build_agent_config(api_key_override),
+            config=config,  
             text_problem=problem_text,
             image_bytes=image_bytes,
             image_mime=image_mime,
@@ -199,15 +217,15 @@ def run_agent_task(
             for idx, step in enumerate(result.agent_steps):
                 insert_trace_node(
                     trace_id=trace_id,
-                    node_name=step.get("agent_name", f"Agent_{idx}"),
+                    node_name=getattr(step, "name", f"Agent_{idx}"),
                     node_type="agent",
-                    status=step.get("status", "completed"),
+                    status=getattr(step, "status", "completed"),
                     start_time=utc_now(),
                     end_time=utc_now(),
-                    duration_ms=step.get("duration_ms", 0),
-                    input_data={"input": step.get("input", "")},
-                    output_data={"output": step.get("output", "")},
-                    error_message=step.get("error", ""),
+                    duration_ms=getattr(step, "duration_ms", 0),
+                    input_data={"input": getattr(step, "input_summary", "")},
+                    output_data={"output": getattr(step, "output_summary", "")},
+                    error_message=getattr(step, "error", ""),
                 )
         # ===== 新增结束 =====
 
@@ -344,8 +362,19 @@ def create_background_task(
     api_key_override: str = "",
     extra_data: Optional[Dict[str, Any]] = None,
 ) -> str:
+    from backend.database import get_conn
+    
     task_id = str(uuid.uuid4())
-    trace_id = generate_trace_id()  # 新增：生成 trace_id
+    trace_id = generate_trace_id()
+    
+    # 获取所有 Agent 的启用版本
+    prompt_versions = {}
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT agent_name, version FROM prompt_versions WHERE is_enabled = 1"
+        ).fetchall()
+        for row in rows:
+            prompt_versions[row["agent_name"]] = row["version"]
     
     initial_data: Dict[str, Any] = {
         "task_id": task_id,
@@ -353,7 +382,8 @@ def create_background_task(
         "problem": problem_text,
         "input_type": input_type,
         "notes": "任务已创建，正在执行多 Agent 工作流。",
-        "trace_id": trace_id,  # 新增：保存到 data 中
+        "trace_id": trace_id,
+        "prompt_versions": prompt_versions,  # 保存所有启用的版本
     }
     if extra_data:
         initial_data.update(extra_data)
@@ -363,6 +393,7 @@ def create_background_task(
         initial_data,
         input_type=input_type,
         problem=problem_text,
+        trace_id=trace_id,
     )
     background_tasks.add_task(
         run_agent_task,
@@ -670,10 +701,28 @@ async def get_task_trace(task_id: str) -> dict:
 
 
 @app.post("/api/benchmark/runs")
-async def start_benchmark_run() -> dict:
+async def start_benchmark_run(background_tasks: BackgroundTasks) -> dict:
     """启动跑批任务"""
+    from sandbox.benchmark_runner import run_benchmark
+    import threading
+    
     run_id = str(uuid.uuid4())
-    # TODO: 后续实现真实的跑批逻辑
+    
+    def run_benchmark_task():
+        try:
+            summary = run_benchmark(
+                data_path=PROJECT_ROOT / "benchmark_data.json",
+                persist=True,
+                api_key=os.getenv("DASHSCOPE_API_KEY", ""),
+            )
+            print(f"✅ Benchmark {run_id} 完成: {summary['passed']}/{summary['total']} 通过")
+        except Exception as e:
+            print(f"❌ Benchmark {run_id} 失败: {e}")
+    
+    # 使用后台线程执行
+    thread = threading.Thread(target=run_benchmark_task)
+    thread.start()
+    
     return api_response(
         {"run_id": run_id, "status": "running"},
         message="跑批任务已启动"
@@ -683,15 +732,54 @@ async def start_benchmark_run() -> dict:
 @app.get("/api/benchmark/runs/{run_id}")
 async def get_benchmark_status(run_id: str) -> dict:
     """获取跑批状态"""
-    # TODO: 后续接入真实状态
-    return api_response({
-        "run_id": run_id,
-        "status": "running",
-        "progress": 0,
-        "total": 100,
-        "completed": 0,
-        "failed": 0
-    })
+    from backend.database import get_conn
+    
+    with get_conn() as conn:
+        run = conn.execute(
+            """
+            SELECT run_id, started_at, finished_at, total, passed, pass_rate,
+                   avg_duration_ms, status
+            FROM benchmark_runs
+            WHERE run_id = ?
+            """,
+            (run_id,)
+        ).fetchone()
+        
+        if not run:
+            raise HTTPException(status_code=404, detail="跑批记录不存在")
+        
+        run_dict = dict(run)
+        
+        # 如果还未完成，计算进度
+        if run_dict["status"] == "running":
+            # 查询已完成的题目数
+            count = conn.execute(
+                "SELECT COUNT(*) FROM benchmark_results WHERE run_id = ?",
+                (run_id,)
+            ).fetchone()[0]
+            total = run_dict["total"] or 100
+            return api_response({
+                "run_id": run_dict["run_id"],
+                "status": "running",
+                "progress": round(count / total * 100, 2) if total > 0 else 0,
+                "total": total,
+                "completed": count,
+                "failed": 0,
+                "passed": 0
+            })
+        
+        return api_response({
+            "run_id": run_dict["run_id"],
+            "status": run_dict["status"],
+            "progress": 100 if run_dict["status"] == "completed" else 0,
+            "total": run_dict["total"],
+            "passed": run_dict["passed"],
+            "failed": run_dict["total"] - run_dict["passed"],
+            "pass_rate": run_dict["pass_rate"],
+            "avg_duration": run_dict["avg_duration_ms"],
+            "started_at": run_dict["started_at"],
+            "finished_at": run_dict["finished_at"]
+        })
 
 
 if __name__ == "__main__":

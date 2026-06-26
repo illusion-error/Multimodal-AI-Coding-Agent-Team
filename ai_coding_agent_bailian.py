@@ -75,6 +75,7 @@ class AgentConfig:
     execution_timeout: int = 8
     enable_local_execution: bool = True
     enable_offline_fallback: bool = True
+    prompt_versions: dict = None  # 新增：保存各 Agent 的 Prompt 版本
 
 
 @dataclass
@@ -1970,7 +1971,6 @@ def build_project_document(
 ```
 """.strip()
 
-
 def solve_problem(
     config: AgentConfig,
     text_problem: str,
@@ -2006,8 +2006,11 @@ def solve_problem(
     test_cases: List[Dict[str, Any]] = []
     repair_attempts: List[Dict[str, Any]] = []
 
+    prompt_versions = getattr(config, "prompt_versions", None) or {}
+
     input_type = "text"
     problem = (text_problem or "").strip()
+
     if looks_like_corrupted_text(problem):
         raise ValueError(
             "题目文本疑似在传输前发生乱码（大量字符变成 ?）。"
@@ -2066,9 +2069,17 @@ def solve_problem(
     # 这一阶段只负责想清楚算法路线，不直接生成代码。
     step_started = now_ms()
     try:
+    
+        effective_problem_for_plan = problem
+        if prompt_versions:
+            version_info = "\n\n## 当前生效的 Prompt 版本\n" + "\n".join(
+                f"- {agent}: {version}" for agent, version in prompt_versions.items()
+            )
+            effective_problem_for_plan = problem + version_info
+    
         plan_markdown, used = plan_solution_with_bailian(
             config,
-            problem,
+            effective_problem_for_plan,  # 修改：使用增强后的题目文本
             retrieved_templates,
             contract,
         )
@@ -2095,12 +2106,19 @@ def solve_problem(
     )
 
     # Agent 3：测试生成。
-    # 这里故意放在代码生成之前，让测试计划成为代码生成的输入约束。
     step_started = now_ms()
     try:
+        # ===== 新增：如果有 prompt_versions，追加到 problem 中 =====
+        effective_problem_for_tests = problem
+        if prompt_versions:
+            version_info = "\n\n## 当前生效的 Prompt 版本\n" + "\n".join(
+                f"- {agent}: {version}" for agent, version in prompt_versions.items()
+            )
+        effective_problem_for_tests = problem + version_info
+    
         test_plan, test_cases, used = generate_tests_with_bailian(
             config,
-            problem,
+            effective_problem_for_tests,  # 修改：使用增强后的题目文本
             plan_markdown,
             contract,
         )
@@ -2128,7 +2146,6 @@ def solve_problem(
     )
 
     # Agent 4：代码生成。
-    # 输入包含题面、规划、RAG 模板和测试计划，输出 Markdown 与 Python 代码块。
     step_started = now_ms()
     provided_code = extract_code(problem)
     repair_request = bool(
@@ -2145,9 +2162,18 @@ def solve_problem(
         generation_status = "provided"
     else:
         try:
+            # ===== 新增：如果有 prompt_versions，追加到 problem 中 =====
+            effective_problem_for_code = problem
+            if prompt_versions:
+                version_info = "\n\n## 当前生效的 Prompt 版本\n" + "\n".join(
+                    f"- {agent}: {version}" for agent, version in prompt_versions.items()
+                )
+                effective_problem_for_code = problem + version_info
+            # ===== 新增结束 =====
+        
             solution_markdown, used = generate_solution_with_bailian(
                 config=config,
-                problem=problem,
+                problem=effective_problem_for_code,  # 修改：使用增强后的题目文本
                 plan=plan_markdown,
                 templates=retrieved_templates,
                 test_plan=test_plan,
@@ -2186,7 +2212,6 @@ def solve_problem(
     )
 
     # Agent 5：执行调试。
-    # 本地运行生成代码；失败时把日志交给调试 Agent，最多修复 3 轮。
     step_started = now_ms()
     (
         final_code,
@@ -2255,6 +2280,7 @@ def solve_problem(
         "semantic_verification_status": semantic_verification_status,
         "trusted_test_count": len(trusted_cases),
         "advisory_test_count": advisory_test_count,
+        "prompt_versions": prompt_versions,  
     }
     document = build_project_document(
         problem=problem,

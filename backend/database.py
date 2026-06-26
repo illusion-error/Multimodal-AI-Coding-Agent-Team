@@ -251,6 +251,7 @@ def create_task(
     input_type: str = "text",
     problem: str = "",
     created_at: Optional[str] = None,
+    trace_id: Optional[str] = None,
 ) -> None:
     now = created_at or utc_now()
     payload = json.dumps(data, ensure_ascii=False)
@@ -258,24 +259,35 @@ def create_task(
         conn.execute(
             """
             INSERT INTO tasks
-                (task_id, status, input_type, problem, created_at, updated_at, data)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (task_id, status, input_type, problem, created_at, updated_at, data, trace_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (task_id, status, input_type, problem, now, now, payload),
+            (task_id, status, input_type, problem, now, now, payload, trace_id),
         )
 
 
 def update_task(task_id: str, status: str, data: Dict[str, Any]) -> None:
     payload = json.dumps(data, ensure_ascii=False)
+    trace_id = data.get("trace_id")
     with get_conn() as conn:
-        cursor = conn.execute(
-            """
-            UPDATE tasks
-            SET status=?, problem=?, updated_at=?, data=?
-            WHERE task_id=?
-            """,
-            (status, str(data.get("problem", "")), utc_now(), payload, task_id),
-        )
+        if trace_id:
+            cursor = conn.execute(
+                """
+                UPDATE tasks
+                SET status=?, problem=?, updated_at=?, data=?, trace_id=?
+                WHERE task_id=?
+                """,
+                (status, str(data.get("problem", "")), utc_now(), payload, trace_id, task_id),
+            )
+        else:
+            cursor = conn.execute(
+                """
+                UPDATE tasks
+                SET status=?, problem=?, updated_at=?, data=?
+                WHERE task_id=?
+                """,
+                (status, str(data.get("problem", "")), utc_now(), payload, task_id),
+            )
         if cursor.rowcount == 0:
             raise KeyError(f"Task not found: {task_id}")
 
@@ -304,7 +316,7 @@ def get_task_by_id(task_id: str) -> Optional[Dict[str, Any]]:
     with get_conn() as conn:
         row = conn.execute(
             """
-            SELECT task_id, status, input_type, problem, created_at, updated_at, data
+            SELECT task_id, status, input_type, problem, created_at, updated_at, data, trace_id
             FROM tasks
             WHERE task_id=?
             """,
@@ -314,6 +326,8 @@ def get_task_by_id(task_id: str) -> Optional[Dict[str, Any]]:
         return None
     task = dict(row)
     task["data"] = json.loads(task["data"])
+    if task.get("trace_id") and "trace_id" not in task["data"]:
+        task["data"]["trace_id"] = task["trace_id"]
     return task
 
 
@@ -321,7 +335,7 @@ def list_all_tasks() -> List[Dict[str, Any]]:
     with get_conn() as conn:
         rows = conn.execute(
             """
-            SELECT task_id, status, input_type, problem, created_at, updated_at, data
+            SELECT task_id, status, input_type, problem, created_at, updated_at, data, trace_id
             FROM tasks
             ORDER BY created_at DESC
             """
@@ -332,6 +346,8 @@ def list_all_tasks() -> List[Dict[str, Any]]:
         data = json.loads(item.pop("data"))
         item["problem"] = item["problem"] or str(data.get("problem", ""))
         item["total_ms"] = data.get("total_ms", 0)
+        if item.get("trace_id"):
+            item["trace_id"] = item["trace_id"]
         tasks.append(item)
     return tasks
 
