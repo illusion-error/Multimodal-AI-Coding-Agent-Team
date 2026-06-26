@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import sys  
+from pathlib import Path  
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  
+
 import io
 import os
 import traceback
@@ -167,7 +172,16 @@ def run_agent_task(
             image_bytes=image_bytes,
             image_mime=image_mime,
         )
-        existing_task = get_task_by_id(task_id)
+
+        # ===== 调试：打印 Agent 返回的数据量 =====
+        print(f"🔍 result.agent_steps: {len(result.agent_steps)}")
+        print(f"🔍 result.test_cases: {len(result.test_cases)}")
+        print(f"🔍 result.repair_attempts: {len(result.repair_attempts)}")
+        if result.agent_steps:
+            print(f"🔍 第一条step示例: {result.agent_steps[0]}")
+        # ===== 调试结束 =====
+
+        existing_task = get_task_by_id(task_id)  
         initial_data = dict(existing_task["data"]) if existing_task else {}
         data = {**initial_data, **agent_result_to_dict(result)}
         data["task_id"] = task_id
@@ -212,11 +226,37 @@ def run_agent_task(
         elif not tests_ok:
             data["notes"] = "生成代码未通过全部自动测试，请查看失败用例和修复记录。"
 
+                # ===== 格式化数据，确保 database.py 能正确写入 =====
+        raw_steps = data.get("agent_steps", [])
+        raw_tests = data.get("test_cases", [])
+        raw_repairs = data.get("repair_attempts", [])
+        
+        # 把 steps 转成 database.py 需要的格式
+        formatted_steps = []
+        for step in raw_steps:
+            formatted_steps.append({
+                "agent_name": step.get("agent_name", step.get("name", "Agent")),
+                "role": step.get("role", ""),
+                "status": step.get("status", "completed"),
+                "input": step.get("input", ""),
+                "output": step.get("output", ""),
+                "duration_ms": step.get("duration_ms", 0),
+                "error": step.get("error", ""),
+            })
+        
+        # tests 直接用，格式已经对了
+        formatted_tests = raw_tests
+        formatted_repairs = raw_repairs
+        
+        print(f"🔍 formatted_steps: {len(formatted_steps)}")
+        print(f"🔍 formatted_tests: {len(formatted_tests)}")
+        print(f"🔍 formatted_repairs: {len(formatted_repairs)}")
+        
         replace_task_artifacts(
             task_id,
-            steps=data.get("agent_steps", []),
-            tests=data.get("test_cases", []),
-            repairs=data.get("repair_attempts", []),
+            steps=formatted_steps,
+            tests=formatted_tests,
+            repairs=formatted_repairs,
         )
         update_task(task_id, final_status, data)
     except Exception as exc:
