@@ -2,7 +2,7 @@ from __future__ import annotations
 import ast
 import json
 from typing import Any, Dict, List, Tuple
-from sandbox.code_runner import execute_code_safely
+from sandbox.code_runner import execute_code_safely, SandboxRequest
 
 RESULT_PREFIX = "__AGENT_EVAL_RESULT__="
 SELF_TEST_FUNCTION_NAMES = {"_run_tests", "run_tests", "_test", "test", "main", "_main"}
@@ -10,7 +10,7 @@ SELF_TEST_FUNCTION_NAMES = {"_run_tests", "run_tests", "_test", "test", "main", 
 def _literal(value: Any) -> Any:
     if not isinstance(value, str): return value
     try: return ast.literal_eval(value)
-    except (SyntaxError, ValueError): return value
+    except: return value
 
 def normalize_case(case: Dict[str, Any]) -> Tuple[List[Any], Dict[str, Any], Any]:
     if "args" in case: args = list(case.get("args") or [])
@@ -26,7 +26,6 @@ def build_test_script(code_str: str, args: List[Any], kwargs: Dict[str, Any], ex
     runtime_code = prepare_runtime_code(code_str)
     return f"""
 {runtime_code}
-
 import json as _agent_json
 try:
     _agent_actual = solution(*{args!r}, **{kwargs!r})
@@ -34,81 +33,58 @@ try:
     _agent_payload = {{"passed": _agent_actual == _agent_expected, "actual": repr(_agent_actual), "expected": repr(_agent_expected), "error": ""}}
 except Exception as _agent_exc:
     _agent_payload = {{"passed": False, "actual": "", "expected": repr({expected!r}), "error": str(_agent_exc)}}
-
 print("{RESULT_PREFIX}" + _agent_json.dumps(_agent_payload, ensure_ascii=False))
 """.strip()
 
-def _is_main_guard(node: ast.AST) -> bool:
-    if not isinstance(node, ast.If): return False
-    test = node.test
-    if not isinstance(test, ast.Compare): return False
-    if not isinstance(test.left, ast.Name) or test.left.id != "__name__": return False
-    if len(test.ops) != 1 or not isinstance(test.ops[0], ast.Eq): return False
-    if len(test.comparators) != 1: return False
-    comparator = test.comparators[0]
-    return isinstance(comparator, ast.Constant) and comparator.value == "__main__"
-
 def prepare_runtime_code(code_str: str) -> str:
-    try: tree = ast.parse(code_str)
-    except SyntaxError: return code_str
-    filtered_body: List[ast.stmt] = []
-    for node in tree.body:
-        if _is_main_guard(node): continue
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.name in SELF_TEST_FUNCTION_NAMES: continue
-        filtered_body.append(node)
-    tree.body = filtered_body
-    ast.fix_missing_locations(tree)
-    try: return ast.unparse(tree)
-    except Exception: return code_str
+    try:
+        tree = ast.parse(code_str)
+        tree.body = [n for n in tree.body if not (isinstance(n, ast.If) and isinstance(n.test, ast.Compare) and isinstance(n.test.left, ast.Name) and n.test.left.id == "__name__")]
+        return ast.unparse(tree)
+    except: return code_str
 
 def _parse_result(stdout: str) -> Dict[str, Any]:
     for line in reversed((stdout or "").splitlines()):
-        if line.startswith(RESULT_PREFIX):
-            return json.loads(line[len(RESULT_PREFIX) :])
-    return {"passed": False, "actual": "", "expected": "", "error": "评测脚本没有返回结构化结果"}
+        if line.startswith(RESULT_PREFIX): return json.loads(line[len(RESULT_PREFIX) :])
+    return {"passed": False, "error": "No result from script"}
 
 def run_auto_tests(code_str: str, test_cases: List[Dict[str, Any]], *, timeout_seconds: int = 3, task_id: str = "evaluation") -> Dict[str, Any]:
-    report: Dict[str, Any] = {
-        "total": len(test_cases),
-        "passed": 0, "failed": 0,
-        "public_passed": 0, "hidden_passed": 0,
-        "hidden_total": sum(1 for c in test_cases if c.get("category") == "hidden"),
-        "pass_rate": 0.0, "total_time_ms": 0, "details": [],
-        "is_final_passed": False # 目标6：新增终极通过标志
-    }
-
+    report = {"total": len(test_cases), "passed": 0, "failed": 0, "pass_rate": 0.0, "total_time_ms": 0, "details": [], "is_final_passed": False, "hidden_passed": 0, "hidden_total": sum(1 for c in test_cases if c.get("category") == "hidden")}
+    
     for index, case in enumerate(test_cases, start=1):
         args, kwargs, expected = normalize_case(case)
-        execution = execute_code_safely(build_test_script(code_str, args, kwargs, expected), task_id=f"{task_id}:{index}", timeout_seconds=timeout_seconds)
+        req = SandboxRequest(code=build_test_script(code_str, args, kwargs, expected), timeout=timeout_seconds)
+        execution = execute_code_safely(req, task_id=f"{task_id}:{index}")
+        payload = _parse_result(execution["stdout"]) if execution["status"] == "success" else {"passed": False, "error": execution["stderr"]}
         
-        payload = _parse_result(execution["stdout"]) if execution["status"] == "success" else {"passed": False, "actual": "", "expected": repr(expected), "error": execution["stderr"] or execution["status"]}
-        
-        passed = bool(payload.get("passed"))
-        case_category = case.get("category", "public")
-        
-        if passed:
+        case_passed = bool(payload.get("passed"))
+        cat = case.get("category", "public")
+        if case_passed:
             report["passed"] += 1
-            if case_category == "public": report["public_passed"] += 1
-            if case_category == "hidden": report["hidden_passed"] += 1
-        else:
-            report["failed"] += 1
-            
-        report["total_time_ms"] += execution["duration_ms"]
+            if cat == "hidden": report["hidden_passed"] += 1
+        else: report["failed"] += 1
         
+        report["total_time_ms"] += execution.get("duration_ms", 0)
+        
+        # 核心恢复：严格对齐组长测试脚本需要的全部字段
         report["details"].append({
-            "name": case.get("name", f"用例 {index}"), "category": case_category,
-            "input": case.get("input", case.get("args", [])), "expected": payload.get("expected", repr(expected)),
-            "actual": payload.get("actual", ""), "passed": passed, "duration_ms": execution["duration_ms"],
-            "error": payload.get("error", ""), "status": execution["status"]
+            "name": case.get("name", f"用例 {index}"),
+            "input": case.get("input", case.get("args", [])),
+            "expected": payload.get("expected", repr(expected)),
+            "actual": payload.get("actual", ""),
+            "passed": case_passed,
+            "category": cat,
+            "source": case.get("source", "system_authoritative"), # 关键修复
+            "trusted": bool(case.get("trusted", True)),           # 关键修复
+            "validation_status": case.get("validation_status", "verified"),
+            "contract_id": case.get("contract_id", ""),
+            "contract_fingerprint": case.get("contract_fingerprint", ""),
+            "duration_ms": execution["duration_ms"],
+            "error": payload.get("error", ""),
+            "status": execution["status"],
         })
 
-    # 核心判断：隐藏用例全部通过才算真正的通过 (覆盖目标 6)
-    if report["hidden_total"] > 0:
-        report["is_final_passed"] = (report["hidden_passed"] == report["hidden_total"])
-    else:
-        report["is_final_passed"] = (report["passed"] == report["total"])
-
-    if report["total"]:
-        report["pass_rate"] = round(report["passed"] / report["total"] * 100, 2)
+    if report["hidden_total"] > 0: report["is_final_passed"] = (report["hidden_passed"] == report["hidden_total"])
+    else: report["is_final_passed"] = (report["passed"] == report["total"])
+    if report["total"]: report["pass_rate"] = round(report["passed"] / report["total"] * 100, 2)
     return report

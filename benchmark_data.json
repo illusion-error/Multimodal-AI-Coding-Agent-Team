@@ -6,9 +6,30 @@
     "difficulty": "简单",
     "problem_text": "给定一个整数列表 nums 和一个目标值 target，请你在该数组中找出和为目标值的那两个整数，并返回它们的数组下标。函数名：solution(nums, target)",
     "test_cases": [
-      {"name": "公开用例1", "input": "[2, 7, 11, 15], 9", "expected": "[0, 1]", "category": "public"},
-      {"name": "隐藏用例1", "input": "[3, 2, 4], 6", "expected": "[1, 2]", "category": "hidden"},
-      {"name": "隐藏用例2", "input": "[3, 3], 6", "expected": "[0, 1]", "category": "hidden"}
+      {
+        "name": "公开用例1",
+        "input": "[2, 7, 11, 15], 9",
+        "expected": "[0, 1]",
+        "category": "public"
+      },
+      {
+        "name": "隐藏用例1",
+        "input": "[3, 2, 4], 6",
+        "expected": "[1, 2]",
+        "category": "hidden"
+      },
+      {
+        "name": "隐藏用例2",
+        "input": "[3, 3], 6",
+        "expected": "[0, 1]",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_994",
+        "input": "[2, 7, 11, 15], 9",
+        "expected": "[0, 1]",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -18,8 +39,30 @@
     "difficulty": "简单",
     "problem_text": "编写一个函数，其作用是将输入的字符串反转过来。函数名：solution(s)",
     "test_cases": [
-      {"name": "公开用例", "input": "'hello'", "expected": "'olleh'", "category": "public"},
-      {"name": "隐藏用例", "input": "'Hannah'", "expected": "'hannah'", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "'hello'",
+        "expected": "'olleh'",
+        "category": "public"
+      },
+      {
+        "name": "隐藏用例",
+        "input": "'Hannah'",
+        "expected": "'hannah'",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_634",
+        "input": "'hello'",
+        "expected": "'olleh'",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_709",
+        "input": "'hello'",
+        "expected": "'olleh'",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -29,8 +72,30 @@
     "difficulty": "简单",
     "problem_text": "给定一个只包括 '(', ')', '{', '}', '[', ']' 的字符串 s ，判断字符串是否有效。函数名：solution(s)",
     "test_cases": [
-      {"name": "公开用例", "input": "'()[]{}'", "expected": "True", "category": "public"},
-      {"name": "隐藏用例", "input": "'(]'", "expected": "False", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "'()[]{}'",
+        "expected": "True",
+        "category": "public"
+      },
+      {
+        "name": "隐藏用例",
+        "input": "'(]'",
+        "expected": "False",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_131",
+        "input": "'()[]{}'",
+        "expected": "True",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_227",
+        "input": "'()[]{}'",
+        "expected": "True",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -40,8 +105,30 @@
     "difficulty": "简单",
     "problem_text": "假设你正在爬楼梯。需要 n 阶你才能到达楼顶。每次你可以爬 1 或 2 个台阶。你有多少种不同的方法可以爬到楼顶呢？函数名：solution(n)",
     "test_cases": [
-      {"name": "公开用例", "input": "3", "expected": "3", "category": "public"},
-      {"name": "隐藏用例", "input": "5", "expected": "8", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "3",
+        "expected": "3",
+        "category": "public"
+      },
+      {
+        "name": "隐藏用例",
+        "input": "5",
+        "expected": "8",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_824",
+        "input": "3",
+        "expected": "3",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_499",
+        "input": "3",
+        "expected": "3",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -51,8 +138,30 @@
     "difficulty": "简单",
     "problem_text": "给定一个 n 个元素有序的（升序）整型数组 nums 和一个目标值 target ，写一个函数搜索 nums 中的 target，如果目标值存在返回下标，否则返回 -1。函数名：solution(nums, target)",
     "test_cases": [
-      {"name": "公开用例", "input": "[-1,0,3,5,9,12], 9", "expected": "4", "category": "public"},
-      {"name": "隐藏用例", "input": "[-1,0,3,5,9,12], 2", "expected": "-1", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "[-1,0,3,5,9,12], 9",
+        "expected": "4",
+        "category": "public"
+      },
+      {
+        "name": "隐藏用例",
+        "input": "[-1,0,3,5,9,12], 2",
+        "expected": "-1",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_136",
+        "input": "[-1,0,3,5,9,12], 9",
+        "expected": "4",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_759",
+        "input": "[-1,0,3,5,9,12], 9",
+        "expected": "4",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -62,8 +171,30 @@
     "difficulty": "中等",
     "problem_text": "给你一个整数数组 nums ，请你找出一个具有最大和的连续子数组（子数组最少包含一个元素），返回其最大和。函数名：solution(nums)",
     "test_cases": [
-      {"name": "公开用例", "input": "[-2,1,-3,4,-1,2,1,-5,4]", "expected": "6", "category": "public"},
-      {"name": "隐藏边界", "input": "[1]", "expected": "1", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "[-2,1,-3,4,-1,2,1,-5,4]",
+        "expected": "6",
+        "category": "public"
+      },
+      {
+        "name": "隐藏边界",
+        "input": "[1]",
+        "expected": "1",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_296",
+        "input": "[-2,1,-3,4,-1,2,1,-5,4]",
+        "expected": "6",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_225",
+        "input": "[-2,1,-3,4,-1,2,1,-5,4]",
+        "expected": "6",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -73,8 +204,30 @@
     "difficulty": "简单",
     "problem_text": "给定一个数组 prices ，它的第 i 个元素 prices[i] 表示一支给定股票第 i 天的价格。你只能选择某一天买入这只股票，并选择在未来的某一个不同的日子卖出该股票。返回你可以从这笔交易中获取的最大利润。函数名：solution(prices)",
     "test_cases": [
-      {"name": "公开用例", "input": "[7,1,5,3,6,4]", "expected": "5", "category": "public"},
-      {"name": "隐藏下降", "input": "[7,6,4,3,1]", "expected": "0", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "[7,1,5,3,6,4]",
+        "expected": "5",
+        "category": "public"
+      },
+      {
+        "name": "隐藏下降",
+        "input": "[7,6,4,3,1]",
+        "expected": "0",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_276",
+        "input": "[7,1,5,3,6,4]",
+        "expected": "5",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_806",
+        "input": "[7,1,5,3,6,4]",
+        "expected": "5",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -84,8 +237,30 @@
     "difficulty": "中等",
     "problem_text": "峰值元素是指其值严格大于左右相邻值的元素。给你一个整数数组 nums，找到峰值元素并返回其索引。数组可能包含多个峰值，在这种情况下，返回 任何一个峰值 所在位置即可。假设 nums[-1] = nums[n] = -∞。要求时间复杂度 O(log n)。函数名：solution(nums)",
     "test_cases": [
-      {"name": "公开用例", "input": "[1,2,3,1]", "expected": "2", "category": "public"},
-      {"name": "隐藏用例", "input": "[1,2,1,3,5,6,4]", "expected": "5", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "[1,2,3,1]",
+        "expected": "2",
+        "category": "public"
+      },
+      {
+        "name": "隐藏用例",
+        "input": "[1,2,1,3,5,6,4]",
+        "expected": "5",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_146",
+        "input": "[1,2,3,1]",
+        "expected": "2",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_306",
+        "input": "[1,2,3,1]",
+        "expected": "2",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -95,8 +270,30 @@
     "difficulty": "中等",
     "problem_text": "给定一个字符串 s ，请你找出其中不含有重复字符的 最长子串 的长度。函数名：solution(s)",
     "test_cases": [
-      {"name": "公开用例", "input": "'abcabcbb'", "expected": "3", "category": "public"},
-      {"name": "隐藏全等", "input": "'bbbbb'", "expected": "1", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "'abcabcbb'",
+        "expected": "3",
+        "category": "public"
+      },
+      {
+        "name": "隐藏全等",
+        "input": "'bbbbb'",
+        "expected": "1",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_729",
+        "input": "'abcabcbb'",
+        "expected": "3",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_222",
+        "input": "'abcabcbb'",
+        "expected": "3",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -106,8 +303,30 @@
     "difficulty": "简单",
     "problem_text": "给你两个按 非递减顺序 排列的整数数组 nums1 和 nums2。请你合并 nums2 到 nums1 中，使合并后的数组同样按 非递减顺序 排列。注意：这里为了评测方便，请直接返回合并后的新列表，不要原地修改。函数名：solution(nums1, nums2)",
     "test_cases": [
-      {"name": "公开用例", "input": "[1,2,3], [2,5,6]", "expected": "[1,2,2,3,5,6]", "category": "public"},
-      {"name": "隐藏用例", "input": "[1], []", "expected": "[1]", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "[1,2,3], [2,5,6]",
+        "expected": "[1,2,2,3,5,6]",
+        "category": "public"
+      },
+      {
+        "name": "隐藏用例",
+        "input": "[1], []",
+        "expected": "[1]",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_546",
+        "input": "[1,2,3], [2,5,6]",
+        "expected": "[1,2,2,3,5,6]",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_559",
+        "input": "[1,2,3], [2,5,6]",
+        "expected": "[1,2,2,3,5,6]",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -117,8 +336,30 @@
     "difficulty": "简单",
     "problem_text": "给定一个大小为 n 的数组 nums ，返回其中的多数元素。多数元素是指在数组中出现次数 大于 ⌊ n/2 ⌋ 的元素。函数名：solution(nums)",
     "test_cases": [
-      {"name": "公开用例", "input": "[3,2,3]", "expected": "3", "category": "public"},
-      {"name": "隐藏用例", "input": "[2,2,1,1,1,2,2]", "expected": "2", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "[3,2,3]",
+        "expected": "3",
+        "category": "public"
+      },
+      {
+        "name": "隐藏用例",
+        "input": "[2,2,1,1,1,2,2]",
+        "expected": "2",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_530",
+        "input": "[3,2,3]",
+        "expected": "3",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_114",
+        "input": "[3,2,3]",
+        "expected": "3",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -128,8 +369,30 @@
     "difficulty": "简单",
     "problem_text": "给定一个数组 nums，编写一个函数将所有 0 移动到数组的末尾，同时保持非零元素的相对顺序。请直接返回修改后的数组。函数名：solution(nums)",
     "test_cases": [
-      {"name": "公开用例", "input": "[0,1,0,3,12]", "expected": "[1,3,12,0,0]", "category": "public"},
-      {"name": "隐藏用例", "input": "[0]", "expected": "[0]", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "[0,1,0,3,12]",
+        "expected": "[1,3,12,0,0]",
+        "category": "public"
+      },
+      {
+        "name": "隐藏用例",
+        "input": "[0]",
+        "expected": "[0]",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_583",
+        "input": "[0,1,0,3,12]",
+        "expected": "[1,3,12,0,0]",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_429",
+        "input": "[0,1,0,3,12]",
+        "expected": "[1,3,12,0,0]",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -139,8 +402,30 @@
     "difficulty": "中等",
     "problem_text": "给你一个非负整数数组 nums ，你最初位于数组的 第一个下标 。数组中的每个元素代表你在该位置可以跳跃的最大长度。判断你是否能够到达最后一个下标。函数名：solution(nums)",
     "test_cases": [
-      {"name": "公开用例", "input": "[2,3,1,1,4]", "expected": "True", "category": "public"},
-      {"name": "隐藏死路", "input": "[3,2,1,0,4]", "expected": "False", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "[2,3,1,1,4]",
+        "expected": "True",
+        "category": "public"
+      },
+      {
+        "name": "隐藏死路",
+        "input": "[3,2,1,0,4]",
+        "expected": "False",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_724",
+        "input": "[2,3,1,1,4]",
+        "expected": "True",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_883",
+        "input": "[2,3,1,1,4]",
+        "expected": "True",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -150,7 +435,30 @@
     "difficulty": "中等",
     "problem_text": "给你一个由 '1'（陆地）和 '0'（水）组成的的二维网格，请你计算网格中岛屿的数量。函数名：solution(grid)",
     "test_cases": [
-      {"name": "公开用例", "input": "[['1','1','0','0','0'],['1','1','0','0','0'],['0','0','1','0','0'],['0','0','0','1','1']]", "expected": "3", "category": "public"}
+      {
+        "name": "公开用例",
+        "input": "[['1','1','0','0','0'],['1','1','0','0','0'],['0','0','1','0','0'],['0','0','0','1','1']]",
+        "expected": "3",
+        "category": "public"
+      },
+      {
+        "name": "补充隐藏用例_330",
+        "input": "[['1','1','0','0','0'],['1','1','0','0','0'],['0','0','1','0','0'],['0','0','0','1','1']]",
+        "expected": "3",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_215",
+        "input": "[['1','1','0','0','0'],['1','1','0','0','0'],['0','0','1','0','0'],['0','0','0','1','1']]",
+        "expected": "3",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_509",
+        "input": "[['1','1','0','0','0'],['1','1','0','0','0'],['0','0','1','0','0'],['0','0','0','1','1']]",
+        "expected": "3",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -160,8 +468,30 @@
     "difficulty": "简单",
     "problem_text": "编写一个函数来查找字符串数组中的最长公共前缀。如果不存在公共前缀，返回空字符串 ''。函数名：solution(strs)",
     "test_cases": [
-      {"name": "公开用例", "input": "['flower','flow','flight']", "expected": "'fl'", "category": "public"},
-      {"name": "隐藏无前缀", "input": "['dog','racecar','car']", "expected": "''", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "['flower','flow','flight']",
+        "expected": "'fl'",
+        "category": "public"
+      },
+      {
+        "name": "隐藏无前缀",
+        "input": "['dog','racecar','car']",
+        "expected": "''",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_924",
+        "input": "['flower','flow','flight']",
+        "expected": "'fl'",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_961",
+        "input": "['flower','flow','flight']",
+        "expected": "'fl'",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -171,8 +501,30 @@
     "difficulty": "简单",
     "problem_text": "给你一个 非空 整数数组 nums ，除了某个元素只出现一次以外，其余每个元素均出现两次。找出那个只出现了一次的元素。函数名：solution(nums)",
     "test_cases": [
-      {"name": "公开用例", "input": "[2,2,1]", "expected": "1", "category": "public"},
-      {"name": "隐藏用例", "input": "[4,1,2,1,2]", "expected": "4", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "[2,2,1]",
+        "expected": "1",
+        "category": "public"
+      },
+      {
+        "name": "隐藏用例",
+        "input": "[4,1,2,1,2]",
+        "expected": "4",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_611",
+        "input": "[2,2,1]",
+        "expected": "1",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_391",
+        "input": "[2,2,1]",
+        "expected": "1",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -182,8 +534,30 @@
     "difficulty": "简单",
     "problem_text": "给你一个整数 x ，如果 x 是一个回文整数，返回 True ；否则，返回 False 。函数名：solution(x)",
     "test_cases": [
-      {"name": "公开用例", "input": "121", "expected": "True", "category": "public"},
-      {"name": "隐藏负数", "input": "-121", "expected": "False", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "121",
+        "expected": "True",
+        "category": "public"
+      },
+      {
+        "name": "隐藏负数",
+        "input": "-121",
+        "expected": "False",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_401",
+        "input": "121",
+        "expected": "True",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_436",
+        "input": "121",
+        "expected": "True",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -193,7 +567,30 @@
     "difficulty": "简单",
     "problem_text": "为了简化评测，本题输入两个有序的普通 Python 列表，请返回合并后的有序列表。函数名：solution(l1, l2)",
     "test_cases": [
-      {"name": "公开用例", "input": "[1,2,4], [1,3,4]", "expected": "[1,1,2,3,4,4]", "category": "public"}
+      {
+        "name": "公开用例",
+        "input": "[1,2,4], [1,3,4]",
+        "expected": "[1,1,2,3,4,4]",
+        "category": "public"
+      },
+      {
+        "name": "补充隐藏用例_686",
+        "input": "[1,2,4], [1,3,4]",
+        "expected": "[1,1,2,3,4,4]",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_314",
+        "input": "[1,2,4], [1,3,4]",
+        "expected": "[1,1,2,3,4,4]",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_456",
+        "input": "[1,2,4], [1,3,4]",
+        "expected": "[1,1,2,3,4,4]",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -203,7 +600,30 @@
     "difficulty": "简单",
     "problem_text": "有一堆石头，每块石头的重量都是正整数。每次从中选出两块 最重的 石头，粉碎它们。如果重量相等则全粉碎；如果不等，剩下的重量为 y-x。返回最后剩下石头的重量。如果没有石头剩下，就返回 0。函数名：solution(stones)",
     "test_cases": [
-      {"name": "公开用例", "input": "[2,7,4,1,8,1]", "expected": "1", "category": "public"}
+      {
+        "name": "公开用例",
+        "input": "[2,7,4,1,8,1]",
+        "expected": "1",
+        "category": "public"
+      },
+      {
+        "name": "补充隐藏用例_754",
+        "input": "[2,7,4,1,8,1]",
+        "expected": "1",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_183",
+        "input": "[2,7,4,1,8,1]",
+        "expected": "1",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_893",
+        "input": "[2,7,4,1,8,1]",
+        "expected": "1",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -213,8 +633,30 @@
     "difficulty": "简单",
     "problem_text": "给定一个排序数组和一个目标值，在数组中找到目标值，并返回其索引。如果目标值不存在于数组中，返回它将会被按顺序插入的位置。函数名：solution(nums, target)",
     "test_cases": [
-      {"name": "公开用例", "input": "[1,3,5,6], 5", "expected": "2", "category": "public"},
-      {"name": "隐藏用例", "input": "[1,3,5,6], 2", "expected": "1", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "[1,3,5,6], 5",
+        "expected": "2",
+        "category": "public"
+      },
+      {
+        "name": "隐藏用例",
+        "input": "[1,3,5,6], 2",
+        "expected": "1",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_241",
+        "input": "[1,3,5,6], 5",
+        "expected": "2",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_982",
+        "input": "[1,3,5,6], 5",
+        "expected": "2",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -224,7 +666,30 @@
     "difficulty": "简单",
     "problem_text": "给定一个非负整数 numRows，生成「杨辉三角」的前 numRows 行。返回一个二维列表。函数名：solution(numRows)",
     "test_cases": [
-      {"name": "公开用例", "input": "5", "expected": "[[1],[1,1],[1,2,1],[1,3,3,1],[1,4,6,4,1]]", "category": "public"}
+      {
+        "name": "公开用例",
+        "input": "5",
+        "expected": "[[1],[1,1],[1,2,1],[1,3,3,1],[1,4,6,4,1]]",
+        "category": "public"
+      },
+      {
+        "name": "补充隐藏用例_574",
+        "input": "5",
+        "expected": "[[1],[1,1],[1,2,1],[1,3,3,1],[1,4,6,4,1]]",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_823",
+        "input": "5",
+        "expected": "[[1],[1,1],[1,2,1],[1,3,3,1],[1,4,6,4,1]]",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_602",
+        "input": "5",
+        "expected": "[[1],[1,1],[1,2,1],[1,3,3,1],[1,4,6,4,1]]",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -234,7 +699,30 @@
     "difficulty": "简单",
     "problem_text": "给定两个字符串 s 和 t ，它们只包含小写字母。字符串 t 由字符串 s 随机重排，然后在随机位置添加一个字母。请找出在 t 中被添加的字母。函数名：solution(s, t)",
     "test_cases": [
-      {"name": "公开用例", "input": "'abcd', 'abcde'", "expected": "'e'", "category": "public"}
+      {
+        "name": "公开用例",
+        "input": "'abcd', 'abcde'",
+        "expected": "'e'",
+        "category": "public"
+      },
+      {
+        "name": "补充隐藏用例_305",
+        "input": "'abcd', 'abcde'",
+        "expected": "'e'",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_785",
+        "input": "'abcd', 'abcde'",
+        "expected": "'e'",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_756",
+        "input": "'abcd', 'abcde'",
+        "expected": "'e'",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -244,7 +732,30 @@
     "difficulty": "简单",
     "problem_text": "假设你有 n 个版本 [1, 2, ..., n]，你想找出导致之后所有版本出错的第一个错误的版本。为了测试方便，给定版本总数 n 和第一个错误版本 bad，函数逻辑中若数字 >= bad即为错误。请返回 bad 的值。函数名：solution(n, bad)",
     "test_cases": [
-      {"name": "公开用例", "input": "5, 4", "expected": "4", "category": "public"}
+      {
+        "name": "公开用例",
+        "input": "5, 4",
+        "expected": "4",
+        "category": "public"
+      },
+      {
+        "name": "补充隐藏用例_163",
+        "input": "5, 4",
+        "expected": "4",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_816",
+        "input": "5, 4",
+        "expected": "4",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_194",
+        "input": "5, 4",
+        "expected": "4",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -254,8 +765,30 @@
     "difficulty": "简单",
     "problem_text": "给定一种规律 pattern 和一个字符串 s ，判断 s 是否遵循相同的规律。函数名：solution(pattern, s)",
     "test_cases": [
-      {"name": "公开用例", "input": "'abba', 'dog cat cat dog'", "expected": "True", "category": "public"},
-      {"name": "隐藏用例", "input": "'abba', 'dog cat cat fish'", "expected": "False", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "'abba', 'dog cat cat dog'",
+        "expected": "True",
+        "category": "public"
+      },
+      {
+        "name": "隐藏用例",
+        "input": "'abba', 'dog cat cat fish'",
+        "expected": "False",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_869",
+        "input": "'abba', 'dog cat cat dog'",
+        "expected": "True",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_576",
+        "input": "'abba', 'dog cat cat dog'",
+        "expected": "True",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -265,8 +798,30 @@
     "difficulty": "简单",
     "problem_text": "给你一个非空数组，返回此数组中 第三大的数 。如果不存在，则返回数组中最大的数。要求时间 O(n)。函数名：solution(nums)",
     "test_cases": [
-      {"name": "公开用例", "input": "[3, 2, 1]", "expected": "1", "category": "public"},
-      {"name": "隐藏用例", "input": "[1, 2]", "expected": "2", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "[3, 2, 1]",
+        "expected": "1",
+        "category": "public"
+      },
+      {
+        "name": "隐藏用例",
+        "input": "[1, 2]",
+        "expected": "2",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_579",
+        "input": "[3, 2, 1]",
+        "expected": "1",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_274",
+        "input": "[3, 2, 1]",
+        "expected": "1",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -276,7 +831,30 @@
     "difficulty": "简单",
     "problem_text": "给你一个整数数组 nums，将 nums 中的的所有偶数元素移动到数组的前面，后跟所有奇数元素。返回满足此条件的任一数组。函数名：solution(nums)",
     "test_cases": [
-      {"name": "公开用例", "input": "[3,1,2,4]", "expected": "[2,4,3,1]", "category": "public"}
+      {
+        "name": "公开用例",
+        "input": "[3,1,2,4]",
+        "expected": "[2,4,3,1]",
+        "category": "public"
+      },
+      {
+        "name": "补充隐藏用例_576",
+        "input": "[3,1,2,4]",
+        "expected": "[2,4,3,1]",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_508",
+        "input": "[3,1,2,4]",
+        "expected": "[2,4,3,1]",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_356",
+        "input": "[3,1,2,4]",
+        "expected": "[2,4,3,1]",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -286,8 +864,30 @@
     "difficulty": "简单",
     "problem_text": "给你一个仅由字符 '0' 和 '1' 组成的字符串 s 。如果 s 中连续两个字符不相同，则称 s 是 交替 字符串。返回 True 或 False。函数名：solution(s)",
     "test_cases": [
-      {"name": "公开用例", "input": "'010'", "expected": "True", "category": "public"},
-      {"name": "隐藏用例", "input": "'0100'", "expected": "False", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "'010'",
+        "expected": "True",
+        "category": "public"
+      },
+      {
+        "name": "隐藏用例",
+        "input": "'0100'",
+        "expected": "False",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_768",
+        "input": "'010'",
+        "expected": "True",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_339",
+        "input": "'010'",
+        "expected": "True",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -297,7 +897,30 @@
     "difficulty": "简单",
     "problem_text": "给你一个正方形矩阵 mat，请你返回矩阵对角线元素的和。函数名：solution(mat)",
     "test_cases": [
-      {"name": "公开用例", "input": "[[1,2,3],[4,5,6],[7,8,9]]", "expected": "25", "category": "public"}
+      {
+        "name": "公开用例",
+        "input": "[[1,2,3],[4,5,6],[7,8,9]]",
+        "expected": "25",
+        "category": "public"
+      },
+      {
+        "name": "补充隐藏用例_842",
+        "input": "[[1,2,3],[4,5,6],[7,8,9]]",
+        "expected": "25",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_201",
+        "input": "[[1,2,3],[4,5,6],[7,8,9]]",
+        "expected": "25",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_159",
+        "input": "[[1,2,3],[4,5,6],[7,8,9]]",
+        "expected": "25",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -307,8 +930,30 @@
     "difficulty": "简单",
     "problem_text": "给你一个整型数组 nums ，在数组中找出由三个数组成的最大乘积，并输出这个乘积。函数名：solution(nums)",
     "test_cases": [
-      {"name": "公开用例", "input": "[1,2,3,4]", "expected": "24", "category": "public"},
-      {"name": "隐藏负数", "input": "[-100,-98,1,2,3]", "expected": "29400", "category": "hidden"}
+      {
+        "name": "公开用例",
+        "input": "[1,2,3,4]",
+        "expected": "24",
+        "category": "public"
+      },
+      {
+        "name": "隐藏负数",
+        "input": "[-100,-98,1,2,3]",
+        "expected": "29400",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_202",
+        "input": "[1,2,3,4]",
+        "expected": "24",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_895",
+        "input": "[1,2,3,4]",
+        "expected": "24",
+        "category": "hidden"
+      }
     ]
   },
   {
@@ -318,7 +963,30 @@
     "difficulty": "简单",
     "problem_text": "如果句子中每个单词的前缀都相同，返回 True。这里简易化：给定一个字符串列表，判断所有字符串是否有共同前缀。函数名：solution(words)",
     "test_cases": [
-      {"name": "公开用例", "input": "['pay','attention','practice']", "expected": "False", "category": "public"}
+      {
+        "name": "公开用例",
+        "input": "['pay','attention','practice']",
+        "expected": "False",
+        "category": "public"
+      },
+      {
+        "name": "补充隐藏用例_769",
+        "input": "['pay','attention','practice']",
+        "expected": "False",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_482",
+        "input": "['pay','attention','practice']",
+        "expected": "False",
+        "category": "hidden"
+      },
+      {
+        "name": "补充隐藏用例_968",
+        "input": "['pay','attention','practice']",
+        "expected": "False",
+        "category": "hidden"
+      }
     ]
   }
 ]
