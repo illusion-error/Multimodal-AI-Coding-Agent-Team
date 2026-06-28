@@ -66,22 +66,24 @@ def run_auto_tests(code_str: str, test_cases: List[Dict[str, Any]], *, timeout_s
         
         report["total_time_ms"] += execution.get("duration_ms", 0)
         
-        # 核心恢复：严格对齐组长测试脚本需要的全部字段
+        # 核心找回：提供绝对全量的字段，防止任何 KeyError
         report["details"].append({
             "name": case.get("name", f"用例 {index}"),
             "input": case.get("input", case.get("args", [])),
+            "args": args, "kwargs": kwargs,
             "expected": payload.get("expected", repr(expected)),
             "actual": payload.get("actual", ""),
             "passed": case_passed,
             "category": cat,
-            "source": case.get("source", "system_authoritative"), # 关键修复
-            "trusted": bool(case.get("trusted", True)),           # 关键修复
+            "purpose": case.get("purpose", ""),
+            "source": case.get("source", "system_authoritative"), # 关键恢复
+            "trusted": bool(case.get("trusted", True)),           # 关键恢复
             "validation_status": case.get("validation_status", "verified"),
             "contract_id": case.get("contract_id", ""),
             "contract_fingerprint": case.get("contract_fingerprint", ""),
-            "duration_ms": execution["duration_ms"],
+            "duration_ms": execution.get("duration_ms", 0),
             "error": payload.get("error", ""),
-            "status": execution["status"],
+            "status": execution.get("status", "unknown"),
         })
 
     if report["hidden_total"] > 0: report["is_final_passed"] = (report["hidden_passed"] == report["hidden_total"])
