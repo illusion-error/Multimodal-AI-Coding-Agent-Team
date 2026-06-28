@@ -36,11 +36,21 @@ def test_get_task_trace_not_found():
 def test_start_benchmark():
     """测试启动跑批"""
     from backend.database import get_conn
+    from backend.main import PROJECT_ROOT
+    import json
     
     # 先清理数据
     with get_conn() as conn:
         conn.execute("DELETE FROM benchmark_results")
         conn.execute("DELETE FROM benchmark_runs")
+    
+    # 读取题库真实数量
+    benchmark_file = PROJECT_ROOT / "benchmark_data.json"
+    total_questions = 0
+    if benchmark_file.exists():
+        with open(benchmark_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            total_questions = len(data) if isinstance(data, list) else 0
     
     response = client.post("/api/benchmark/runs")
     assert response.status_code == 200
@@ -58,7 +68,7 @@ def test_start_benchmark():
         ).fetchone()
         assert row is not None
         assert row["status"] == "running"
-        assert row["total"] == 0
+        assert row["total"] == total_questions
         assert row["passed"] == 0
 
 def test_get_benchmark_status():

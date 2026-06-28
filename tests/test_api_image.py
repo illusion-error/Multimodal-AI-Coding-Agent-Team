@@ -1,4 +1,5 @@
 import io
+import time
 
 from PIL import Image
 
@@ -42,6 +43,14 @@ def test_image_validation_and_workflow(client):
     )
     assert created.status_code == 200
     task_id = created.json()["data"]["task_id"]
+
+    # 等待任务完成
+    for _ in range(30):
+        detail = client.get(f"/api/tasks/{task_id}").json()["data"]
+        if detail["status"] != "running":
+            break
+        time.sleep(0.5)
+
     detail = client.get(f"/api/tasks/{task_id}").json()["data"]
     assert detail["status"] == "completed"
     assert detail["input_type"] == "image"

@@ -20,7 +20,7 @@ def test_request_api_key_is_forwarded_without_persistence(client, monkeypatch):
     assert created.status_code == 200
     task_id = created.json()["data"]["task_id"]
     detail = client.get(f"/api/tasks/{task_id}").json()["data"]
-    assert captured["api_key"] == "request-only-test-key"
+    assert captured.get("api_key") == "request-only-test-key"
     assert detail["api_key_source"] == "request"
     assert "request-only-test-key" not in str(detail)
     assert "request-only-test-key" not in str(client.get("/api/tasks").json())

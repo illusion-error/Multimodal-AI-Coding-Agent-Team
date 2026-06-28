@@ -1,3 +1,6 @@
+import time
+
+
 def test_text_task_full_workflow(client):
     assert client.get("/api/health").json()["data"]["agent_loaded"] is True
     assert client.post("/api/tasks/text", json={"problem_text": "   "}).status_code == 400
@@ -8,6 +11,13 @@ def test_text_task_full_workflow(client):
     )
     assert created.status_code == 200
     task_id = created.json()["data"]["task_id"]
+
+    # 等待任务完成
+    for _ in range(30):
+        detail = client.get(f"/api/tasks/{task_id}").json()["data"]
+        if detail["status"] != "running":
+            break
+        time.sleep(0.5)
 
     detail = client.get(f"/api/tasks/{task_id}").json()["data"]
     assert detail["status"] == "completed"
@@ -31,7 +41,19 @@ def test_text_task_full_workflow(client):
 
     rerun = client.post(f"/api/tasks/{task_id}/rerun").json()["data"]
     assert rerun["task_id"] != task_id
-    assert client.get(f"/api/tasks/{rerun['task_id']}").json()["data"]["status"] == "completed"
+
+    # 等待重跑任务完成
+    for _ in range(30):
+        detail = client.get(f"/api/tasks/{rerun['task_id']}").json()["data"]
+        if detail["status"] != "running":
+            break
+        time.sleep(0.5)
+
+    assert (
+        client.get(f"/api/tasks/{rerun['task_id']}")
+        .json()["data"]["status"]
+        == "completed"
+    )
 
     metrics = client.get("/api/metrics/summary").json()["data"]
     assert metrics["total_tasks"] == 2
@@ -53,6 +75,14 @@ def test_hello_world_api_uses_authoritative_semantics(client):
         json={"problem_text": "write a simple hello world script"},
     )
     task_id = created.json()["data"]["task_id"]
+
+    # 等待任务完成
+    for _ in range(30):
+        detail = client.get(f"/api/tasks/{task_id}").json()["data"]
+        if detail["status"] != "running":
+            break
+        time.sleep(0.5)
+
     detail = client.get(f"/api/tasks/{task_id}").json()["data"]
     cases = client.get(f"/api/tasks/{task_id}/tests").json()["data"]
 
@@ -73,6 +103,14 @@ def test_unknown_problem_runs_without_using_advisory_tests_as_oracle(client):
         json={"problem_text": "implement a custom transformation not in registry"},
     )
     task_id = created.json()["data"]["task_id"]
+
+    # 等待任务完成
+    for _ in range(30):
+        detail = client.get(f"/api/tasks/{task_id}").json()["data"]
+        if detail["status"] != "running":
+            break
+        time.sleep(0.5)
+
     detail = client.get(f"/api/tasks/{task_id}").json()["data"]
 
     assert detail["status"] == "completed"
@@ -84,6 +122,12 @@ def test_unknown_problem_runs_without_using_advisory_tests_as_oracle(client):
 
 def test_failed_execution_is_not_counted_as_completed(client, monkeypatch):
     import backend.main as backend_main
+    from backend.database import get_conn
+
+    # ===== 清空缓存表，确保不被缓存干扰 =====
+    with get_conn() as conn:
+        conn.execute("DELETE FROM code_cache")
+    # ===== 结束 =====
 
     original_solve = backend_main.solve_problem
 
@@ -105,11 +149,20 @@ def test_failed_execution_is_not_counted_as_completed(client, monkeypatch):
         return result
 
     monkeypatch.setattr(backend_main, "solve_problem", return_failed_result)
+
     created = client.post(
         "/api/tasks/text",
         json={"problem_text": "two sum: return indices for nums and target"},
     )
     task_id = created.json()["data"]["task_id"]
+
+    # 等待任务完成
+    for _ in range(30):
+        detail = client.get(f"/api/tasks/{task_id}").json()["data"]
+        if detail["status"] != "running":
+            break
+        time.sleep(0.5)
+
     detail = client.get(f"/api/tasks/{task_id}").json()["data"]
     metrics = client.get("/api/metrics/summary").json()["data"]
 
@@ -128,8 +181,20 @@ def solution(nums, target)
     return []
 ```
 """
-    created = client.post("/api/tasks/text", json={"problem_text": problem})
+
+    created = client.post(
+        "/api/tasks/text",
+        json={"problem_text": problem},
+    )
     task_id = created.json()["data"]["task_id"]
+
+    # 等待任务完成
+    for _ in range(30):
+        detail = client.get(f"/api/tasks/{task_id}").json()["data"]
+        if detail["status"] != "running":
+            break
+        time.sleep(0.5)
+
     detail = client.get(f"/api/tasks/{task_id}").json()["data"]
     repairs = client.get(f"/api/tasks/{task_id}/repairs").json()["data"]
     tests = client.get(f"/api/tasks/{task_id}/tests").json()["data"]

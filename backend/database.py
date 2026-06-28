@@ -179,6 +179,40 @@ def init_db() -> None:
                 expires_at TIMESTAMP
             );
 
+            CREATE TABLE IF NOT EXISTS code_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cache_key TEXT UNIQUE NOT NULL,
+                problem_hash TEXT NOT NULL,
+                image_hash TEXT,
+                prompt_version TEXT,
+                model_name TEXT,
+                cache_type TEXT NOT NULL DEFAULT 'success_code',
+                code TEXT NOT NULL,
+                solution_markdown TEXT,
+                test_cases TEXT,
+                semantic_status TEXT NOT NULL,
+                hit_count INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS task_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL,
+                queue_type TEXT NOT NULL DEFAULT 'agent',
+                status TEXT NOT NULL DEFAULT 'queued',
+                payload TEXT NOT NULL,
+                priority INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                started_at TIMESTAMP,
+                finished_at TIMESTAMP,
+                error_message TEXT,
+                retry_count INTEGER DEFAULT 0,
+                max_retries INTEGER DEFAULT 3,
+                worker_id TEXT
+            );
+
             """
         )
 
@@ -239,6 +273,12 @@ def init_db() -> None:
                 ON benchmark_runs(finished_at DESC);
             CREATE INDEX IF NOT EXISTS idx_benchmark_results_run
                 ON benchmark_results(run_id, result_id);
+            CREATE INDEX IF NOT EXISTS idx_task_queue_status_priority
+                ON task_queue(status, priority, created_at);
+            CREATE INDEX IF NOT EXISTS idx_code_cache_problem_hash
+                ON code_cache(problem_hash);
+            CREATE INDEX IF NOT EXISTS idx_code_cache_cache_type
+                ON code_cache(cache_type);
             """
         )
 
@@ -255,21 +295,51 @@ def create_task(
 ) -> None:
     now = created_at or utc_now()
     payload = json.dumps(data, ensure_ascii=False)
-    with get_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO tasks
-                (task_id, status, input_type, problem, created_at, updated_at, data, trace_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (task_id, status, input_type, problem, now, now, payload, trace_id),
-        )
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO tasks
+                    (task_id, status, input_type, problem, created_at, updated_at, data, trace_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (task_id, status, input_type, problem, now, now, payload, trace_id),
+            )
+            conn.commit()
+    except Exception as e:
+        print(f"[ERROR] create_task 失败: task_id={task_id}, 错误={e}")
+        raise
 
 
 def update_task(task_id: str, status: str, data: Dict[str, Any]) -> None:
     payload = json.dumps(data, ensure_ascii=False)
     trace_id = data.get("trace_id")
     with get_conn() as conn:
+        # 先检查任务是否存在
+        row = conn.execute(
+            "SELECT task_id FROM tasks WHERE task_id = ?",
+            (task_id,)
+        ).fetchone()
+        if not row:
+            print(f"[ERROR] update_task: 任务 {task_id} 在 tasks 表中不存在")
+            # 尝试重新插入
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO tasks
+                        (task_id, status, input_type, problem, created_at, updated_at, data, trace_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (task_id, status, data.get("input_type", "text"), str(data.get("problem", "")), utc_now(), utc_now(), payload, trace_id),
+                )
+                conn.commit()
+                print(f"[INFO] update_task: 已重新插入任务 {task_id}")
+                return
+            except Exception as e:
+                print(f"[ERROR] update_task: 重新插入失败 {e}")
+                raise KeyError(f"Task not found: {task_id}")
+        
+        # 正常更新
         if trace_id:
             cursor = conn.execute(
                 """
@@ -288,6 +358,7 @@ def update_task(task_id: str, status: str, data: Dict[str, Any]) -> None:
                 """,
                 (status, str(data.get("problem", "")), utc_now(), payload, task_id),
             )
+        conn.commit()
         if cursor.rowcount == 0:
             raise KeyError(f"Task not found: {task_id}")
 
@@ -932,3 +1003,264 @@ def get_task_by_task_id_for_trace(task_id: str) -> Optional[Dict[str, Any]]:
         ).fetchone()
     return dict(row) if row else None
 
+
+# ========== 新增：任务队列操作函数 ==========
+
+def enqueue_task(task_id: str, payload: Dict[str, Any], queue_type: str = "agent") -> int:
+    """将任务加入队列"""
+    with get_conn() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO task_queue 
+            (task_id, queue_type, status, payload, created_at, updated_at)
+            VALUES (?, ?, 'queued', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            (task_id, queue_type, json.dumps(payload, ensure_ascii=False))
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+
+def dequeue_task(worker_id: str, queue_type: str = "agent") -> Optional[Dict[str, Any]]:
+    """获取一个待执行任务（原子操作）"""
+    with get_conn() as conn:
+        # 找到一个 queued 任务并锁定为 running
+        row = conn.execute(
+            """
+            SELECT id, task_id, payload, retry_count, max_retries
+            FROM task_queue
+            WHERE status = 'queued' AND queue_type = ?
+            ORDER BY priority DESC, created_at ASC
+            LIMIT 1
+            """,
+            (queue_type,)
+        ).fetchone()
+        
+        if not row:
+            return None
+        
+        # 更新状态为 running
+        conn.execute(
+            """
+            UPDATE task_queue
+            SET status = 'running', 
+                started_at = CURRENT_TIMESTAMP, 
+                updated_at = CURRENT_TIMESTAMP,
+                worker_id = ?
+            WHERE id = ?
+            """,
+            (worker_id, row["id"])
+        )
+        
+        return dict(row)
+
+
+def complete_task(task_id: str, status: str, error_message: str = ""):
+    """标记任务完成"""
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE task_queue
+            SET status = ?,
+                finished_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP,
+                error_message = ?
+            WHERE task_id = ?
+            """,
+            (status, error_message, task_id)
+        )
+
+
+def fail_task(task_id: str, error_message: str):
+    """标记任务失败，如果重试次数未满则重新入队"""
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT retry_count, max_retries, payload
+            FROM task_queue
+            WHERE task_id = ?
+            """,
+            (task_id,)
+        ).fetchone()
+        
+        if not row:
+            return
+        
+        if row["retry_count"] < row["max_retries"]:
+            # 重新入队
+            conn.execute(
+                """
+                UPDATE task_queue
+                SET status = 'queued',
+                    retry_count = retry_count + 1,
+                    updated_at = CURRENT_TIMESTAMP,
+                    worker_id = NULL,
+                    error_message = ?
+                WHERE task_id = ?
+                """,
+                (f"重试 {row['retry_count'] + 1}: {error_message}", task_id)
+            )
+        else:
+            # 最终失败
+            conn.execute(
+                """
+                UPDATE task_queue
+                SET status = 'failed',
+                    finished_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP,
+                    error_message = ?
+                WHERE task_id = ?
+                """,
+                (f"重试耗尽: {error_message}", task_id)
+            )
+
+
+def recover_tasks():
+    """启动时恢复中断的任务"""
+    with get_conn() as conn:
+        # 将 running 超过 5 分钟的任务标记为中断并重新入队
+        conn.execute(
+            """
+            UPDATE task_queue
+            SET status = 'queued',
+                worker_id = NULL,
+                updated_at = CURRENT_TIMESTAMP,
+                error_message = '任务在启动时恢复，之前状态为 running'
+            WHERE status = 'running' 
+              AND datetime(started_at) < datetime('now', '-5 minutes')
+            """
+        )
+
+
+# ========== 新增：代码缓存操作函数 ==========
+
+def generate_cache_key(problem_text: str, image_bytes: Optional[bytes] = None, prompt_version: str = "", model: str = "", test_mode: bool = False) -> str:
+    import hashlib
+    import os
+    import sys
+    
+    # 规范化题目文本
+    normalized_problem = problem_text.strip().lower()
+    problem_hash = hashlib.md5(normalized_problem.encode('utf-8')).hexdigest()
+    
+    # 图片哈希
+    image_hash = ""
+    if image_bytes:
+        image_hash = hashlib.md5(image_bytes).hexdigest()
+    
+    # 检测是否为测试环境
+    is_test = test_mode or os.getenv("PYTEST_CURRENT_TEST") is not None or "pytest" in sys.modules
+    test_suffix = "_test" if is_test else ""
+    
+    # 组合键
+    key_parts = [problem_hash, image_hash, prompt_version, model, test_suffix]
+    full_key = "|".join(key_parts)
+    cache_key = hashlib.md5(full_key.encode('utf-8')).hexdigest()
+    
+    return cache_key
+
+
+def get_cache_by_key(cache_key: str) -> Optional[Dict[str, Any]]:
+    """根据缓存键获取缓存"""
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT id, cache_key, problem_hash, image_hash, prompt_version, model_name,
+                   cache_type, code, solution_markdown, test_cases, semantic_status,
+                   hit_count, created_at, updated_at
+            FROM code_cache
+            WHERE cache_key = ?
+            """,
+            (cache_key,)
+        ).fetchone()
+    
+    if not row:
+        return None
+    
+    result = dict(row)
+    # 增加命中次数
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE code_cache SET hit_count = hit_count + 1 WHERE cache_key = ?",
+            (cache_key,)
+        )
+    
+    return result
+
+
+def save_code_cache(
+    cache_key: str,
+    problem_hash: str,
+    code: str,
+    solution_markdown: str,
+    test_cases: List[Dict[str, Any]],
+    semantic_status: str,
+    image_hash: str = "",
+    prompt_version: str = "",
+    model_name: str = "",
+    cache_type: str = "success_code"
+) -> int:
+    """保存代码缓存（只有语义 verified 才能缓存）"""
+    if semantic_status != "verified":
+        return 0  # 不缓存非 verified 的结果
+    
+    with get_conn() as conn:
+        # 先删除旧的
+        conn.execute(
+            "DELETE FROM code_cache WHERE cache_key = ?",
+            (cache_key,)
+        )
+        
+        # 插入新的
+        cursor = conn.execute(
+            """
+            INSERT INTO code_cache
+            (cache_key, problem_hash, image_hash, prompt_version, model_name,
+             cache_type, code, solution_markdown, test_cases, semantic_status,
+             hit_count, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            (
+                cache_key,
+                problem_hash,
+                image_hash,
+                prompt_version,
+                model_name,
+                cache_type,
+                code,
+                solution_markdown,
+                json.dumps(test_cases, ensure_ascii=False) if test_cases else "[]",
+                semantic_status,
+            )
+        )
+        return cursor.lastrowid
+
+
+def get_cached_solution(
+    problem_text: str,
+    image_bytes: Optional[bytes] = None,
+    prompt_version: str = "",
+    model: str = "",
+    test_mode: bool = False
+) -> Optional[Dict[str, Any]]:
+    """根据题目获取缓存的解决方案"""
+    cache_key = generate_cache_key(problem_text, image_bytes, prompt_version, model, test_mode)
+    return get_cache_by_key(cache_key)
+
+
+def get_hit_count_by_problem(problem_text: str) -> int:
+    """获取某道题目的缓存命中次数"""
+    import hashlib
+    problem_hash = hashlib.md5(problem_text.strip().lower().encode('utf-8')).hexdigest()
+    
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT SUM(hit_count) as total_hits
+            FROM code_cache
+            WHERE problem_hash = ?
+            """,
+            (problem_hash,)
+        ).fetchone()
+    
+    return row["total_hits"] if row and row["total_hits"] else 0

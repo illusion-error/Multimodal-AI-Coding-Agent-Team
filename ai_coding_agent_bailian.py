@@ -641,6 +641,13 @@ def call_bailian_chat(
         else:
             try:
                 result = json.loads(body)
+                # ===== 新增：提取 token 信息到全局变量 =====
+                usage = result.get("usage", {})
+                _last_token_usage = {
+                    "prompt_tokens": usage.get("prompt_tokens", 0),
+                    "completion_tokens": usage.get("completion_tokens", 0),
+                    "total_tokens": usage.get("total_tokens", 0),
+                }
                 return result["choices"][0]["message"]["content"]
             except Exception as exc:
                 raise RuntimeError(f"百炼响应解析失败: {body[:1000]}") from exc
