@@ -27,6 +27,18 @@ def test_runner_output_truncation():
     assert len(res["stdout"]) < 10100 
     assert "[Output Truncated" in res["stdout"]
 
+def test_skip_static_validation_requires_force_docker():
+    """专项测试：验证安全底线 - 任何尝试绕过静态检查但未开启强隔离的请求都应被拦截"""
+    res = execute_code_safely(SandboxRequest(
+        code="open('unsafe.txt', 'w').write('x')", # 这是一个高危动作
+        skip_static_validation=True,
+        force_docker=False,
+    ))
+
+    # 验证：系统必须拒绝执行并返回 system_error
+    assert res["status"] == "system_error"
+    assert "force_docker=True" in res["stderr"]
+
 @pytest.mark.skipif(not DOCKER_AVAILABLE, reason="禁网测试需要真实的 Docker 环境支持")
 def test_runner_network_isolation():
     """专项测试：物理网络隔离 (断网) - 使用 skip_static_validation 强测底层 Docker"""

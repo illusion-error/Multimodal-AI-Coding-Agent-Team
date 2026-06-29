@@ -89,6 +89,21 @@ def execute_code_safely(request: Union[SandboxRequest, str], task_id: str = "tes
     start_time = time.perf_counter()
     res_usage = {"memory_mb": request.memory_mb, "cpu_cores": request.cpu_cores, "network": request.network}
     
+    # =========================================================================
+    # 核心修复：执行安全双因素校验 (必须在 validate_code 之前！)
+    # =========================================================================
+    if request.skip_static_validation and not request.force_docker:
+        return asdict(SandboxResult(
+            "system_error",
+            "",
+            "skip_static_validation must require force_docker=True",
+            1,
+            False,
+            int((time.perf_counter() - start_time) * 1000),
+            res_usage,
+        ))
+    # =========================================================================
+
     if not request.skip_static_validation:
         v = validate_code(request.code)
         if v: return asdict(SandboxResult("blocked", "", "; ".join(v), 126, False, int((time.perf_counter()-start_time)*1000), res_usage))
