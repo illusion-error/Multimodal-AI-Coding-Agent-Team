@@ -26,6 +26,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
@@ -84,6 +85,11 @@ def _allowed_origins() -> list[str]:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    # ===== 新增：启动时恢复中断的任务 =====
+    from backend.database import recover_tasks
+    recover_tasks()
+    print("[INFO] 已执行任务恢复检查")
+    # ===== 新增结束 =====
     # 启动后台 Worker
     from backend.worker import start_worker
     start_worker()
@@ -113,6 +119,68 @@ ERROR_CODES = {
     429: {"code": 429, "message": "请求过于频繁，请稍后再试"},
     500: {"code": 500, "message": "服务器内部错误"},
 }
+
+app = FastAPI(title="AI Coding Agent API", version=APP_VERSION, lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins(),
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ===== 新增：统一错误码 =====
+ERROR_CODES = {
+    400: {"code": 400, "message": "请求参数错误"},
+    404: {"code": 404, "message": "资源不存在"},
+    409: {"code": 409, "message": "资源冲突"},
+    429: {"code": 429, "message": "请求过于频繁，请稍后再试"},
+    500: {"code": 500, "message": "服务器内部错误"},
+}
+
+
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """统一处理 HTTP 异常"""
+    error_info = ERROR_CODES.get(exc.status_code, ERROR_CODES.get(500))
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "code": exc.status_code,
+            "message": exc.detail or error_info["message"],
+            "data": None
+        }
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """统一处理参数验证异常"""
+    return JSONResponse(
+        status_code=400,
+        content={
+            "code": 400,
+            "message": "请求参数验证失败",
+            "data": None
+        }
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """统一处理未捕获的异常"""
+    import traceback
+    print(f"[ERROR] 未捕获异常: {traceback.format_exc()}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "code": 500,
+            "message": "服务器内部错误，请稍后重试",
+            "data": None
+        }
+    )
+
 
 def error_response(code: int, message: str = "") -> dict:
     """统一错误响应格式"""
@@ -405,24 +473,15 @@ def run_agent_task(
         )
         data["selected_model"] = model_choice["model"]
         data["route_reason"] = model_choice["reason"]
-        # ===== 新增：Token 和成本记录 =====
         data["token_usage"] = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
+            "source": "unknown"  # 标记数据来源：unknown 表示无供应商数据
         }
-        # 估算成本（仅供参考，实际费用以百炼账单为准）
-        # qwen-turbo: 约 0.0003/1K tokens, qwen-plus: 约 0.002/1K, qwen-max: 约 0.02/1K
-        model_prices = {
-            "qwen-turbo": 0.0003,
-            "qwen-plus": 0.002,
-            "qwen-max": 0.02,
-            "qwen3-vl-plus": 0.005,
-        }
-        total_tokens = data["token_usage"].get("total_tokens", 0)
-        price_per_token = model_prices.get(model_choice["model"], 0.001) / 1000
-        data["estimated_cost"] = round(total_tokens * price_per_token, 6)
-        # ===== 新增结束 =====
+        # 没有真实 token 数据时，成本为 0
+        data["estimated_cost"] = 0.0
+
         tests = data.get("test_cases", [])
         execution_ok = data["execution_report"].get("exit_code") == 0
         trusted_tests = [
@@ -492,8 +551,8 @@ def run_agent_task(
                 problem_hash = hashlib.md5(problem_text.strip().lower().encode('utf-8')).hexdigest()
                 image_hash = hashlib.md5(image_bytes).hexdigest() if image_bytes else ""
                 prompt_version_str = str(prompt_versions.get("CodeGenerator", ""))
-                model_name = "qwen-plus"
-                cache_key = generate_cache_key(problem_text, image_bytes, prompt_version_str, model_name, test_mode=is_test)
+                model_name = model_choice["model"] 
+                cache_key = generate_cache_key(problem_text, image_bytes, prompt_version_str, model_name, rag_version="", test_mode=is_test)
                 
                 save_code_cache(
                     cache_key=cache_key,
@@ -874,6 +933,37 @@ async def rerun_task(
         message="重新执行任务已创建",
     )
 
+
+@app.post("/api/tasks/{task_id}/cancel")
+async def cancel_task(task_id: str) -> dict:
+    """取消正在运行或排队中的任务"""
+    from backend.database import get_conn, utc_now  # ← 新增 utc_now
+    
+    task = get_task_by_id(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    status = task.get("status", "")
+    if status not in ["running", "queued"]:
+        raise HTTPException(
+            status_code=409,
+            detail=f"任务状态为 {status}，无法取消（只能取消 running 或 queued 状态）"
+        )
+    
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE tasks SET status = 'cancelled', updated_at = ? WHERE task_id = ?",
+            (utc_now(), task_id)
+        )
+        conn.execute(
+            "UPDATE task_queue SET status = 'cancelled', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?",
+            (task_id,)
+        )
+    
+    return api_response(
+        {"task_id": task_id, "status": "cancelled"},
+        message="任务已取消"
+    )
 
 @app.get("/api/metrics/summary")
 async def get_metrics_summary() -> dict:

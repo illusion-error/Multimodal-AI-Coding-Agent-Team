@@ -66,7 +66,7 @@ def test_text_api_rejects_corrupted_question_mark_input(client):
         json={"problem_text": "???????? nums ???? target ????????????"},
     )
     assert response.status_code == 400
-    assert "乱码" in response.json()["detail"]
+    assert "乱码" in response.json()["message"]
 
 
 def test_hello_world_api_uses_authoritative_semantics(client):

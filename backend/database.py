@@ -196,6 +196,30 @@ def init_db() -> None:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
+
+            CREATE TABLE IF NOT EXISTS recognition_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cache_key TEXT UNIQUE NOT NULL,
+                problem_hash TEXT NOT NULL,
+                image_hash TEXT,
+                prompt_version TEXT,
+                model_name TEXT,
+                recognized_text TEXT NOT NULL,
+                contract TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS rag_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cache_key TEXT UNIQUE NOT NULL,
+                problem_hash TEXT NOT NULL,
+                prompt_version TEXT,
+                model_name TEXT,
+                templates TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+
             CREATE TABLE IF NOT EXISTS task_queue (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 task_id TEXT NOT NULL,
@@ -1132,28 +1156,22 @@ def recover_tasks():
         )
 
 
-# ========== 新增：代码缓存操作函数 ==========
-
-def generate_cache_key(problem_text: str, image_bytes: Optional[bytes] = None, prompt_version: str = "", model: str = "", test_mode: bool = False) -> str:
+def generate_cache_key(problem_text: str, image_bytes: Optional[bytes] = None, prompt_version: str = "", model: str = "", rag_version: str = "", test_mode: bool = False) -> str:
     import hashlib
     import os
     import sys
     
-    # 规范化题目文本
     normalized_problem = problem_text.strip().lower()
     problem_hash = hashlib.md5(normalized_problem.encode('utf-8')).hexdigest()
     
-    # 图片哈希
     image_hash = ""
     if image_bytes:
         image_hash = hashlib.md5(image_bytes).hexdigest()
     
-    # 检测是否为测试环境
     is_test = test_mode or os.getenv("PYTEST_CURRENT_TEST") is not None or "pytest" in sys.modules
     test_suffix = "_test" if is_test else ""
     
-    # 组合键
-    key_parts = [problem_hash, image_hash, prompt_version, model, test_suffix]
+    key_parts = [problem_hash, image_hash, prompt_version, model, rag_version, test_suffix]
     full_key = "|".join(key_parts)
     cache_key = hashlib.md5(full_key.encode('utf-8')).hexdigest()
     
@@ -1241,10 +1259,11 @@ def get_cached_solution(
     image_bytes: Optional[bytes] = None,
     prompt_version: str = "",
     model: str = "",
+    rag_version: str = "",
     test_mode: bool = False
 ) -> Optional[Dict[str, Any]]:
     """根据题目获取缓存的解决方案"""
-    cache_key = generate_cache_key(problem_text, image_bytes, prompt_version, model, test_mode)
+    cache_key = generate_cache_key(problem_text, image_bytes, prompt_version, model, rag_version, test_mode)
     return get_cache_by_key(cache_key)
 
 
