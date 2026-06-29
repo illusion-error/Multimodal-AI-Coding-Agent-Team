@@ -57,7 +57,11 @@ from backend.database import (  # noqa: E402
     get_trace_by_trace_id,      
     get_task_by_task_id_for_trace,  
     insert_trace_node,          
-    insert_tool_call         
+    insert_tool_call,
+    save_recognition_cache,
+    get_recognition_cache,
+    save_rag_cache,
+    get_rag_cache,
 )
 
 
@@ -354,9 +358,6 @@ def run_agent_task(
    
     # ===== 检测是否为测试环境 =====
     is_test = os.getenv("PYTEST_CURRENT_TEST") is not None or "pytest" in sys.modules
-    # ===== 结束 =====
-    
-        # ===== 测试环境完全跳过缓存 =====
     if not is_test:
         prompt_version_str = str(prompt_versions.get("CodeGenerator", ""))
         model_name = "qwen-plus"
@@ -395,9 +396,30 @@ def run_agent_task(
                     end_time=utc_now(),
                 )
             return
-    # ===== 结束 =====
-    
-    # ===== 新增：记录 Agent 开始节点 =====
+
+
+    if not is_test:
+        import hashlib
+        prompt_version_str = str(prompt_versions.get("CodeGenerator", ""))
+        model_choice = select_model(problem_text, image_bytes)
+        model_name = model_choice.get("model", "qwen-plus")
+        
+        # 生成缓存键
+        recog_cache_key = generate_cache_key(problem_text, image_bytes, prompt_version_str, model_name, rag_version="", test_mode=is_test)
+        
+        # 尝试读取识别缓存
+        recog_cached = get_recognition_cache(recog_cache_key)
+        if recog_cached:
+            print(f"[Cache] 命中识别缓存: {recog_cached['cache_key'][:8]}...")
+            # 使用缓存的识别结果
+            problem_text = recog_cached.get("recognized_text", problem_text)
+        
+        # 尝试读取 RAG 缓存
+        rag_cached = get_rag_cache(recog_cache_key)
+        if rag_cached:
+            print(f"[Cache] 命中 RAG 缓存: {rag_cached['cache_key'][:8]}...")
+            # RAG 缓存会在 solve_problem 中自动使用
+
     if trace_id:
         insert_trace_node(
             trace_id=trace_id,
@@ -406,22 +428,16 @@ def run_agent_task(
             status="running",
             start_time=utc_now(),
         )
-    # ===== 新增结束 =====
+
 
     try:
-        # ===== 新增：模型路由选择 =====
         model_choice = select_model(problem_text, image_bytes)
         print(f"[Route] 选择模型: {model_choice['model']}, 原因: {model_choice['reason']}")
-        # ===== 新增结束 =====
-        
-        # ===== 修改：构建 config 并传入 prompt_versions 和模型 =====
         config = build_agent_config(api_key_override)
         config.trace_id = trace_id
         config.text_model = model_choice["model"]  # 使用路由选择的模型
-        # ===== 新增：将 prompt_versions 传给 config =====
         if prompt_versions:
             config.prompt_versions = prompt_versions
-        # ===== 新增结束 =====
         
         result = solve_problem(
             config=config,  
@@ -430,7 +446,7 @@ def run_agent_task(
             image_mime=image_mime,
         )
 
-        # ===== 新增：记录 Agent 步骤 =====
+
         if trace_id:
             for idx, step in enumerate(result.agent_steps):
                 insert_trace_node(
@@ -445,7 +461,6 @@ def run_agent_task(
                     output_data={"output": getattr(step, "output_summary", "")},
                     error_message=getattr(step, "error", ""),
                 )
-        # ===== 新增结束 =====
 
         # ===== 调试：打印 Agent 返回的数据量 =====
         print(f"[DEBUG] result.agent_steps: {len(result.agent_steps)}")
@@ -545,8 +560,8 @@ def run_agent_task(
         )
         update_task(task_id, final_status, data)
         
-        # ===== 新增：保存缓存（只有 verified 才缓存） =====
-        if final_status == "completed" and data.get("semantic_verification_status") == "verified":
+        
+        if final_status == "completed":
             try:
                 problem_hash = hashlib.md5(problem_text.strip().lower().encode('utf-8')).hexdigest()
                 image_hash = hashlib.md5(image_bytes).hexdigest() if image_bytes else ""
@@ -554,19 +569,44 @@ def run_agent_task(
                 model_name = model_choice["model"] 
                 cache_key = generate_cache_key(problem_text, image_bytes, prompt_version_str, model_name, rag_version="", test_mode=is_test)
                 
-                save_code_cache(
+                # 1. 保存识别缓存（无论是否 verified 都保存）
+                save_recognition_cache(
                     cache_key=cache_key,
                     problem_hash=problem_hash,
                     image_hash=image_hash,
                     prompt_version=prompt_version_str,
                     model_name=model_name,
-                    code=data.get("code", ""),
-                    solution_markdown=data.get("solution_markdown", ""),
-                    test_cases=data.get("test_cases", []),
-                    semantic_status=data.get("semantic_verification_status", ""),
-                    cache_type="success_code"
+                    recognized_text=problem_text,
+                    contract=data.get("problem_contract", {})
                 )
-                print(f"[Cache] 已保存缓存: {cache_key[:8]}...")
+                print(f"[Cache] 已保存识别缓存: {cache_key[:8]}...")
+                
+                # 2. 保存 RAG 缓存（无论是否 verified 都保存）
+                if data.get("retrieved_templates"):
+                    save_rag_cache(
+                        cache_key=cache_key,
+                        problem_hash=problem_hash,
+                        prompt_version=prompt_version_str,
+                        model_name=model_name,
+                        templates=data.get("retrieved_templates", [])
+                    )
+                    print(f"[Cache] 已保存 RAG 缓存: {cache_key[:8]}...")
+                
+                # 3. 保存代码缓存（只有 verified 才缓存）
+                if data.get("semantic_verification_status") == "verified":
+                    save_code_cache(
+                        cache_key=cache_key,
+                        problem_hash=problem_hash,
+                        image_hash=image_hash,
+                        prompt_version=prompt_version_str,
+                        model_name=model_name,
+                        code=data.get("code", ""),
+                        solution_markdown=data.get("solution_markdown", ""),
+                        test_cases=data.get("test_cases", []),
+                        semantic_status=data.get("semantic_verification_status", ""),
+                        cache_type="success_code"
+                    )
+                    print(f"[Cache] 已保存代码缓存: {cache_key[:8]}...")
             except Exception as e:
                 print(f"[Cache] 保存缓存失败: {e}")
 

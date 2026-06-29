@@ -1283,3 +1283,122 @@ def get_hit_count_by_problem(problem_text: str) -> int:
         ).fetchone()
     
     return row["total_hits"] if row and row["total_hits"] else 0
+
+
+
+def save_recognition_cache(
+    cache_key: str,
+    problem_hash: str,
+    recognized_text: str,
+    contract: Optional[Dict[str, Any]] = None,
+    image_hash: str = "",
+    prompt_version: str = "",
+    model_name: str = "",
+) -> int:
+    """保存题目识别缓存"""
+    with get_conn() as conn:
+        # 先删除旧的
+        conn.execute(
+            "DELETE FROM recognition_cache WHERE cache_key = ?",
+            (cache_key,)
+        )
+        
+        cursor = conn.execute(
+            """
+            INSERT INTO recognition_cache
+            (cache_key, problem_hash, image_hash, prompt_version, model_name,
+             recognized_text, contract)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                cache_key,
+                problem_hash,
+                image_hash,
+                prompt_version,
+                model_name,
+                recognized_text,
+                json.dumps(contract, ensure_ascii=False) if contract else None,
+            )
+        )
+        return cursor.lastrowid
+
+
+def get_recognition_cache(cache_key: str) -> Optional[Dict[str, Any]]:
+    """获取题目识别缓存"""
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT cache_key, problem_hash, image_hash, prompt_version, model_name,
+                   recognized_text, contract, created_at
+            FROM recognition_cache
+            WHERE cache_key = ?
+            """,
+            (cache_key,)
+        ).fetchone()
+    
+    if not row:
+        return None
+    
+    result = dict(row)
+    if result.get("contract"):
+        try:
+            result["contract"] = json.loads(result["contract"])
+        except:
+            pass
+    return result
+
+
+def save_rag_cache(
+    cache_key: str,
+    problem_hash: str,
+    templates: List[Dict[str, Any]],
+    prompt_version: str = "",
+    model_name: str = "",
+) -> int:
+    """保存 RAG 检索缓存"""
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM rag_cache WHERE cache_key = ?",
+            (cache_key,)
+        )
+        
+        cursor = conn.execute(
+            """
+            INSERT INTO rag_cache
+            (cache_key, problem_hash, prompt_version, model_name, templates)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                cache_key,
+                problem_hash,
+                prompt_version,
+                model_name,
+                json.dumps(templates, ensure_ascii=False),
+            )
+        )
+        return cursor.lastrowid
+
+
+def get_rag_cache(cache_key: str) -> Optional[Dict[str, Any]]:
+    """获取 RAG 检索缓存"""
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT cache_key, problem_hash, prompt_version, model_name,
+                   templates, created_at
+            FROM rag_cache
+            WHERE cache_key = ?
+            """,
+            (cache_key,)
+        ).fetchone()
+    
+    if not row:
+        return None
+    
+    result = dict(row)
+    if result.get("templates"):
+        try:
+            result["templates"] = json.loads(result["templates"])
+        except:
+            pass
+    return result
