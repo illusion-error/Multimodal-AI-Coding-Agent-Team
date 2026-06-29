@@ -225,6 +225,7 @@ SQLite 数据通过 `backend_data` 卷持久化。
 | `/api/tasks/{task_id}/report` | GET | 下载任务报告(Markdown) | 路径: `task_id` | 返回 `.md` 文件 |
 | `/api/tasks/{task_id}/rerun` | POST | 重新执行任务 | 路径: `task_id` | `{task_id, status, original_task_id}` |
 | `/api/metrics/summary` | GET | 获取统计指标 | 无 | `{total_tasks, success_rate, avg_response_time, ...}` |
+| `/api/tasks/{task_id}/cancel` | POST | 取消任务 | 路径: `task_id` | `{task_id, status}` |
 | `/api/benchmark/results` | GET | 获取最近跑批结果 | 无 | `{run_id, total, passed, pass_rate, details, ...}` |
 | `/api/prompt/versions` | GET | 获取 Prompt 版本列表 | `agent_name`(可选) | `[{id, agent_name, version, is_enabled, change_log, created_at}]` |
 | `/api/prompt/version` | POST | 切换 Prompt 版本 | `{agent_name, version}` | `{agent_name, version}` |
@@ -380,6 +381,45 @@ SQLite 数据通过 `backend_data` 卷持久化。
 {
   "code": 404,
   "message": "跑批记录不存在",
+  "data": null
+}
+```
+
+### 5. POST /api/tasks/{task_id}/cancel
+
+**请求示例**：
+
+无请求体，直接通过路径参数指定任务 ID。
+
+**响应示例（成功取消任务）**：
+
+```json
+{
+  "code": 0,
+  "message": "任务已取消",
+  "data": {
+    "task_id": "abc-123-def",
+    "status": "cancelled"
+  }
+}
+```
+
+**响应示例（任务不存在）**：
+
+```json
+{
+  "code": 404,
+  "message": "任务不存在",
+  "data": null
+}
+```
+
+**响应示例（无法取消）**：
+
+```json
+{
+  "code": 409,
+  "message": "任务状态为 completed，无法取消（只能取消 running 或 queued 状态）",
   "data": null
 }
 ```

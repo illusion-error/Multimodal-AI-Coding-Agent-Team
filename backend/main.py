@@ -62,6 +62,7 @@ from backend.database import (  # noqa: E402
     get_recognition_cache,
     save_rag_cache,
     get_rag_cache,
+    get_current_rag_version
 )
 
 
@@ -105,24 +106,6 @@ async def lifespan(_: FastAPI):
     from backend.worker import stop_worker
     stop_worker()
 
-
-app = FastAPI(title="AI Coding Agent API", version=APP_VERSION, lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_allowed_origins(),
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ===== 新增：统一错误码 =====
-ERROR_CODES = {
-    400: {"code": 400, "message": "请求参数错误"},
-    404: {"code": 404, "message": "资源不存在"},
-    409: {"code": 409, "message": "资源冲突"},
-    429: {"code": 429, "message": "请求过于频繁，请稍后再试"},
-    500: {"code": 500, "message": "服务器内部错误"},
-}
 
 app = FastAPI(title="AI Coding Agent API", version=APP_VERSION, lifespan=lifespan)
 app.add_middleware(
@@ -339,10 +322,12 @@ def run_agent_task(
 ) -> None:
     """Run the real five-Agent workflow and persist its complete result."""
 
-    # ===== 修改：获取 trace_id 和 prompt_versions =====
-    from backend.database import utc_now, get_conn, get_cached_solution, save_code_cache, generate_cache_key
+    from backend.database import utc_now, get_conn, get_cached_solution, save_code_cache, generate_cache_key, get_current_rag_version
     import json
     import hashlib
+    
+    current_rag_version = get_current_rag_version()
+    
     task_info = get_task_by_id(task_id)
     trace_id = task_info.get("data", {}).get("trace_id", "") if task_info else ""
     
@@ -352,7 +337,6 @@ def run_agent_task(
         data = task_info.get("data", {})
         prompt_versions = data.get("prompt_versions", {})
     
-    # ===== 新增：如果存在启用的版本，打印日志 =====
     if prompt_versions:
         print(f"[INFO] Task {task_id} using Prompt versions: {prompt_versions}")
    
@@ -360,7 +344,9 @@ def run_agent_task(
     is_test = os.getenv("PYTEST_CURRENT_TEST") is not None or "pytest" in sys.modules
     if not is_test:
         prompt_version_str = str(prompt_versions.get("CodeGenerator", ""))
-        model_name = "qwen-plus"
+        # 使用路由选择的真实模型名
+        temp_model_choice = select_model(problem_text, image_bytes)
+        model_name = temp_model_choice.get("model", "qwen-plus")
         cached_result = get_cached_solution(problem_text, image_bytes, prompt_version_str, model_name, test_mode=is_test)
         
         if cached_result:
@@ -403,10 +389,9 @@ def run_agent_task(
         prompt_version_str = str(prompt_versions.get("CodeGenerator", ""))
         model_choice = select_model(problem_text, image_bytes)
         model_name = model_choice.get("model", "qwen-plus")
-        
-        # 生成缓存键
-        recog_cache_key = generate_cache_key(problem_text, image_bytes, prompt_version_str, model_name, rag_version="", test_mode=is_test)
-        
+
+
+        recog_cache_key = generate_cache_key(problem_text, image_bytes, prompt_version_str, model_name, rag_version=current_rag_version, test_mode=is_test)        
         # 尝试读取识别缓存
         recog_cached = get_recognition_cache(recog_cache_key)
         if recog_cached:
@@ -445,6 +430,39 @@ def run_agent_task(
             image_bytes=image_bytes,
             image_mime=image_mime,
         )
+
+        # 检查是否修复失败且执行失败，如果是则升级模型重试
+        repair_attempts = getattr(result, 'repair_attempts', [])
+        execution_report_text = getattr(result, 'execution_report', "")
+        execution_success = "退出码：0" in execution_report_text or "exit_code: 0" in execution_report_text
+        
+        # 如果有 2 次及以上修复尝试且执行失败，升级模型
+        if len(repair_attempts) >= 2 and not execution_success:
+            current_model = model_choice["model"]
+            upgraded_model = None
+            
+            # 升级路径：qwen-turbo -> qwen-plus -> qwen-max
+            if current_model == "qwen-turbo":
+                upgraded_model = "qwen-plus"
+            elif current_model == "qwen-plus":
+                upgraded_model = "qwen-max"
+            elif current_model == "qwen-max":
+                # 已经是最高级，不升级
+                upgraded_model = None
+            
+            if upgraded_model:
+                print(f"[Route] 修复失败 ({len(repair_attempts)} 次)，升级模型: {current_model} -> {upgraded_model}")
+                config.text_model = upgraded_model
+                # 重新执行
+                result = solve_problem(
+                    config=config,
+                    text_problem=problem_text,
+                    image_bytes=image_bytes,
+                    image_mime=image_mime,
+                )
+                # 更新模型选择信息
+                model_choice["model"] = upgraded_model
+                model_choice["reason"] = f"{model_choice['reason']} (修复失败后升级到 {upgraded_model})"
 
 
         if trace_id:
@@ -560,14 +578,14 @@ def run_agent_task(
         )
         update_task(task_id, final_status, data)
         
-        
+
         if final_status == "completed":
             try:
                 problem_hash = hashlib.md5(problem_text.strip().lower().encode('utf-8')).hexdigest()
                 image_hash = hashlib.md5(image_bytes).hexdigest() if image_bytes else ""
                 prompt_version_str = str(prompt_versions.get("CodeGenerator", ""))
                 model_name = model_choice["model"] 
-                cache_key = generate_cache_key(problem_text, image_bytes, prompt_version_str, model_name, rag_version="", test_mode=is_test)
+                cache_key = generate_cache_key(problem_text, image_bytes, prompt_version_str, model_name, rag_version=current_rag_version, test_mode=is_test)
                 
                 # 1. 保存识别缓存（无论是否 verified 都保存）
                 save_recognition_cache(

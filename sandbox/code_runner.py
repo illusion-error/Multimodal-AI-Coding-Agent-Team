@@ -43,6 +43,12 @@ BLOCKED_CALL_NAMES = {"__import__", "eval", "exec", "compile", "getattr", "setat
 BLOCKED_ATTRIBUTES = {"chmod", "chown", "connect", "kill", "open", "popen", "remove", "removedirs", "rename", "replace", "request", "rmdir", "rmtree", "spawn", "system", "terminate", "unlink", "urlopen"}
 MAX_OUTPUT_CHARS = 10000
 
+def truncate_with_indicator(text: str, max_len: int = MAX_OUTPUT_CHARS) -> str:
+    """截断文本，如果被截断则追加 [Output Truncated] 标识"""
+    if len(text) <= max_len:
+        return text
+    return text[:max_len - 20] + "...[Output Truncated]"
+
 class SafetyVisitor(ast.NodeVisitor):
     def __init__(self) -> None:
         self.violations: List[str] = []
@@ -113,7 +119,9 @@ def execute_code_safely(request: Union[SandboxRequest, str], task_id: str = "tes
                     ec = exit_status["StatusCode"]
                     stderr = logs if ec != 0 else ""
                     if ec == 137: stderr = f"Memory Limit Exceeded (OOM > {request.memory_mb}MB)"
-                    return asdict(SandboxResult("success" if ec==0 else "failed", logs[:MAX_OUTPUT_CHARS] if ec==0 else "", stderr[:MAX_OUTPUT_CHARS], ec, False, duration, res_usage))
+                    stdout_text = truncate_with_indicator(logs) if ec == 0 else ""
+                    stderr_text = truncate_with_indicator(stderr) if stderr else ""
+                    return asdict(SandboxResult("success" if ec==0 else "failed", stdout_text, stderr_text, ec, False, duration, res_usage))
                 except Exception as wait_e:
                     if "timed out" in str(wait_e).lower() or "timeout" in str(wait_e).lower() or "readtimeout" in str(wait_e).lower():
                         return asdict(SandboxResult("timeout", "", f"Execution Timeout: >{request.timeout}s", 124, True, request.timeout*1000, res_usage))
@@ -133,7 +141,9 @@ def execute_code_safely(request: Union[SandboxRequest, str], task_id: str = "tes
         try:
             cp = subprocess.run([sys.executable, "-I", "-B", file_path], cwd=temp_dir, capture_output=True, text=True, timeout=request.timeout)
             duration = int((time.perf_counter() - start_time) * 1000)
-            return asdict(SandboxResult("success" if cp.returncode == 0 else "failed", cp.stdout[:MAX_OUTPUT_CHARS], cp.stderr[:MAX_OUTPUT_CHARS], cp.returncode, False, duration, res_usage))
+            stdout_text = truncate_with_indicator(cp.stdout)
+            stderr_text = truncate_with_indicator(cp.stderr)
+            return asdict(SandboxResult("success" if cp.returncode == 0 else "failed", stdout_text, stderr_text, cp.returncode, False, duration, res_usage))
         except subprocess.TimeoutExpired:
             return asdict(SandboxResult("timeout", "", "Execution Timeout", 124, True, int(request.timeout*1000), res_usage))
         except Exception as e:

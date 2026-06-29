@@ -219,6 +219,24 @@ def init_db() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
+            CREATE TABLE IF NOT EXISTS rag_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cache_key TEXT UNIQUE NOT NULL,
+                problem_hash TEXT NOT NULL,
+                prompt_version TEXT,
+                model_name TEXT,
+                templates TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS rag_versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                version TEXT NOT NULL,
+                is_enabled INTEGER DEFAULT 1,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
 
             CREATE TABLE IF NOT EXISTS task_queue (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1402,3 +1420,52 @@ def get_rag_cache(cache_key: str) -> Optional[Dict[str, Any]]:
         except:
             pass
     return result
+
+
+def get_current_rag_version() -> str:
+    """获取当前启用的 RAG 版本"""
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT version FROM rag_versions
+            WHERE is_enabled = 1
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    
+    if not row:
+        return "v1"  # 默认版本
+    
+    return row["version"]
+
+
+def set_rag_version(version: str, description: str = "") -> None:
+    """设置 RAG 版本（将指定版本设为启用，其他版本禁用）"""
+    with get_conn() as conn:
+        # 禁用所有版本
+        conn.execute(
+            "UPDATE rag_versions SET is_enabled = 0, updated_at = CURRENT_TIMESTAMP"
+        )
+        
+        # 检查版本是否存在
+        row = conn.execute(
+            "SELECT id FROM rag_versions WHERE version = ?",
+            (version,)
+        ).fetchone()
+        
+        if row:
+            # 启用该版本
+            conn.execute(
+                "UPDATE rag_versions SET is_enabled = 1, updated_at = CURRENT_TIMESTAMP WHERE version = ?",
+                (version,)
+            )
+        else:
+            # 插入新版本
+            conn.execute(
+                """
+                INSERT INTO rag_versions (version, is_enabled, description)
+                VALUES (?, 1, ?)
+                """,
+                (version, description)
+            )
