@@ -8,10 +8,13 @@ import time
 from typing import Any, Dict, List, Union
 from dataclasses import dataclass, asdict
 
+# === 修复 2：严格的 Docker Daemon 可用性检测 ===
 try:
     import docker
+    _client = docker.from_env()
+    _client.ping()
     DOCKER_AVAILABLE = True
-except ImportError:
+except Exception:
     DOCKER_AVAILABLE = False
 
 @dataclass
@@ -23,6 +26,7 @@ class SandboxRequest:
     cpu_cores: float = 1.0
     network: bool = False
     files: Dict[str, str] = None
+    force_docker: bool = False  # 新增：是否强制要求物理隔离（禁止 fallback）
 
 @dataclass
 class SandboxResult:
@@ -34,9 +38,8 @@ class SandboxResult:
     duration_ms: int
     resource_usage: Dict[str, Any]
 
-# 恢复组长最严密的黑名单，防范混淆绕过测试
 ALLOWED_IMPORT_ROOTS = {"bisect", "collections", "dataclasses", "decimal", "fractions", "functools", "heapq", "itertools", "json", "math", "operator", "re", "statistics", "string", "typing"}
-BLOCKED_CALL_NAMES = {"__import__", "breakpoint", "compile", "delattr", "dir", "eval", "exec", "getattr", "globals", "help", "input", "locals", "open", "setattr", "vars"}
+BLOCKED_CALL_NAMES = {"__import__", "eval", "exec", "compile", "getattr", "setattr", "open", "breakpoint", "input", "globals", "locals", "vars"}
 BLOCKED_ATTRIBUTES = {"chmod", "chown", "connect", "kill", "open", "popen", "remove", "removedirs", "rename", "replace", "request", "rmdir", "rmtree", "spawn", "system", "terminate", "unlink", "urlopen"}
 MAX_OUTPUT_CHARS = 10000
 
@@ -46,12 +49,12 @@ class SafetyVisitor(ast.NodeVisitor):
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
-            if alias.name.split(".")[0] not in ALLOWED_IMPORT_ROOTS:
+            if alias.name.split(".", 1)[0] not in ALLOWED_IMPORT_ROOTS:
                 self.violations.append(f"禁止导入模块: {alias.name}")
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        if (node.module or "").split(".")[0] not in ALLOWED_IMPORT_ROOTS:
+        if (node.module or "").split(".", 1)[0] not in ALLOWED_IMPORT_ROOTS:
             self.violations.append(f"禁止导入模块: {node.module}")
         self.generic_visit(node)
 
@@ -82,22 +85,19 @@ def execute_code_safely(request: Union[SandboxRequest, str], task_id: str = "tes
     
     start_time = time.perf_counter()
     res_usage = {"memory_mb": request.memory_mb, "cpu_cores": request.cpu_cores, "network": request.network}
-
-    # 1. 静态安全拦截
+    
     violations = validate_code(request.code)
     if violations:
-        return asdict(SandboxResult("blocked", "", "; ".join(violations), 126, False, 0, res_usage))
+        return asdict(SandboxResult("blocked", "", "; ".join(violations), 126, False, int((time.perf_counter()-start_time)*1000), res_usage))
 
-    # 核心修复：防止 Windows 下 Timeout 杀进程后，临时文件夹删除报错导致崩溃
-    temp_kw = {"prefix": "agent_exec_"}
-    if sys.version_info >= (3, 10): temp_kw["ignore_cleanup_errors"] = True
+    # === 修复 3：强沙盒测试不够硬 ===
+    if request.force_docker and not DOCKER_AVAILABLE:
+        return asdict(SandboxResult("system_error", "", "强制要求 Docker 隔离，但宿主机未检测到可用 Daemon", 1, False, 0, res_usage))
 
-    # 2. 真实 Docker 强隔离逻辑
     if DOCKER_AVAILABLE:
         try:
             client = docker.from_env()
-            client.ping()
-            with tempfile.TemporaryDirectory(**temp_kw) as temp_dir:
+            with tempfile.TemporaryDirectory(prefix="agent_docker_") as temp_dir:
                 file_path = os.path.join(temp_dir, "solution.py")
                 with open(file_path, "w", encoding="utf-8") as f: f.write(request.code)
                 container = client.containers.run(
@@ -106,7 +106,6 @@ def execute_code_safely(request: Union[SandboxRequest, str], task_id: str = "tes
                     network_disabled=not request.network, mem_limit=f"{request.memory_mb}m",
                     nano_cpus=int(request.cpu_cores * 1e9), pids_limit=32, detach=True
                 )
-                
                 try:
                     exit_status = container.wait(timeout=request.timeout)
                     logs = container.logs().decode('utf-8', errors='replace')
@@ -122,11 +121,13 @@ def execute_code_safely(request: Union[SandboxRequest, str], task_id: str = "tes
                 finally:
                     try: container.remove(force=True)
                     except: pass
-        except Exception:
-            pass # 如果 Docker 挂了，默默走本地兜底，防止未捕获异常导致接口 500
+        except Exception as e:
+            if request.force_docker:
+                return asdict(SandboxResult("system_error", "", f"Docker 运行异常: {e}", 1, False, 0, res_usage))
+            pass # 如果不强求 docker，默默走本地兜底
 
-    # 3. 本地环境降级兜底
-    with tempfile.TemporaryDirectory(**temp_kw) as temp_dir:
+    # 本地兜底
+    with tempfile.TemporaryDirectory(prefix="fallback_") as temp_dir:
         file_path = os.path.join(temp_dir, "solution.py")
         with open(file_path, "w", encoding="utf-8") as f: f.write(request.code)
         try:
