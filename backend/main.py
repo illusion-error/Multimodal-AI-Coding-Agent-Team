@@ -347,7 +347,7 @@ def run_agent_task(
         # 使用路由选择的真实模型名
         temp_model_choice = select_model(problem_text, image_bytes)
         model_name = temp_model_choice.get("model", "qwen-plus")
-        cached_result = get_cached_solution(problem_text, image_bytes, prompt_version_str, model_name, test_mode=is_test)
+        cached_result = get_cached_solution(problem_text, image_bytes, prompt_version_str, model_name, rag_version=current_rag_version, test_mode=is_test)
         
         if cached_result:
             print(f"[Cache] 命中缓存: {cached_result['cache_key'][:8]}...")

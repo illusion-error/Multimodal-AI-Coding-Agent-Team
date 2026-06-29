@@ -219,16 +219,6 @@ def init_db() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
-            CREATE TABLE IF NOT EXISTS rag_cache (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cache_key TEXT UNIQUE NOT NULL,
-                problem_hash TEXT NOT NULL,
-                prompt_version TEXT,
-                model_name TEXT,
-                templates TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-
             CREATE TABLE IF NOT EXISTS rag_versions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 version TEXT NOT NULL,
