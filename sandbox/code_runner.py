@@ -8,7 +8,6 @@ import time
 from typing import Any, Dict, List, Union
 from dataclasses import dataclass, asdict
 
-# === 修复 2：严格的 Docker Daemon 可用性检测 ===
 try:
     import docker
     _client = docker.from_env()
@@ -26,7 +25,8 @@ class SandboxRequest:
     cpu_cores: float = 1.0
     network: bool = False
     files: Dict[str, str] = None
-    force_docker: bool = False  # 新增：是否强制要求物理隔离（禁止 fallback）
+    force_docker: bool = False
+    skip_static_validation: bool = False # === 核心修复 1：增加跳过静态检查标识 ===
 
 @dataclass
 class SandboxResult:
@@ -42,12 +42,6 @@ ALLOWED_IMPORT_ROOTS = {"bisect", "collections", "dataclasses", "decimal", "frac
 BLOCKED_CALL_NAMES = {"__import__", "eval", "exec", "compile", "getattr", "setattr", "open", "breakpoint", "input", "globals", "locals", "vars"}
 BLOCKED_ATTRIBUTES = {"chmod", "chown", "connect", "kill", "open", "popen", "remove", "removedirs", "rename", "replace", "request", "rmdir", "rmtree", "spawn", "system", "terminate", "unlink", "urlopen"}
 MAX_OUTPUT_CHARS = 10000
-
-def truncate_with_indicator(text: str, max_len: int = MAX_OUTPUT_CHARS) -> str:
-    """截断文本，如果被截断则追加 [Output Truncated] 标识"""
-    if len(text) <= max_len:
-        return text
-    return text[:max_len - 20] + "...[Output Truncated]"
 
 class SafetyVisitor(ast.NodeVisitor):
     def __init__(self) -> None:
@@ -92,11 +86,15 @@ def execute_code_safely(request: Union[SandboxRequest, str], task_id: str = "tes
     start_time = time.perf_counter()
     res_usage = {"memory_mb": request.memory_mb, "cpu_cores": request.cpu_cores, "network": request.network}
     
-    violations = validate_code(request.code)
-    if violations:
-        return asdict(SandboxResult("blocked", "", "; ".join(violations), 126, False, int((time.perf_counter()-start_time)*1000), res_usage))
+    # === 核心修复 2：实现跳过逻辑与安全绑定 ===
+    if not request.skip_static_validation:
+        violations = validate_code(request.code)
+        if violations:
+            return asdict(SandboxResult("blocked", "", "; ".join(violations), 126, False, int((time.perf_counter()-start_time)*1000), res_usage))
+    elif not request.force_docker:
+        # 安全底线：不允许在本地兜底模式下跳过静态检查
+        return asdict(SandboxResult("system_error", "", "跳过静态检查必须结合 force_docker=True 使用", 1, False, 0, res_usage))
 
-    # === 修复 3：强沙盒测试不够硬 ===
     if request.force_docker and not DOCKER_AVAILABLE:
         return asdict(SandboxResult("system_error", "", "强制要求 Docker 隔离，但宿主机未检测到可用 Daemon", 1, False, 0, res_usage))
 
@@ -114,14 +112,12 @@ def execute_code_safely(request: Union[SandboxRequest, str], task_id: str = "tes
                 )
                 try:
                     exit_status = container.wait(timeout=request.timeout)
-                    logs = container.logs().decode('utf-8', errors='replace')
+                    logs = container.logs(stdout=True, stderr=True).decode('utf-8', errors='replace')
                     duration = int((time.perf_counter() - start_time) * 1000)
                     ec = exit_status["StatusCode"]
                     stderr = logs if ec != 0 else ""
                     if ec == 137: stderr = f"Memory Limit Exceeded (OOM > {request.memory_mb}MB)"
-                    stdout_text = truncate_with_indicator(logs) if ec == 0 else ""
-                    stderr_text = truncate_with_indicator(stderr) if stderr else ""
-                    return asdict(SandboxResult("success" if ec==0 else "failed", stdout_text, stderr_text, ec, False, duration, res_usage))
+                    return asdict(SandboxResult("success" if ec==0 else "failed", logs[:MAX_OUTPUT_CHARS] if ec==0 else "", stderr[:MAX_OUTPUT_CHARS], ec, False, duration, res_usage))
                 except Exception as wait_e:
                     if "timed out" in str(wait_e).lower() or "timeout" in str(wait_e).lower() or "readtimeout" in str(wait_e).lower():
                         return asdict(SandboxResult("timeout", "", f"Execution Timeout: >{request.timeout}s", 124, True, request.timeout*1000, res_usage))
@@ -132,18 +128,27 @@ def execute_code_safely(request: Union[SandboxRequest, str], task_id: str = "tes
         except Exception as e:
             if request.force_docker:
                 return asdict(SandboxResult("system_error", "", f"Docker 运行异常: {e}", 1, False, 0, res_usage))
-            pass # 如果不强求 docker，默默走本地兜底
+            pass # 降级
 
-    # 本地兜底
+    # 3. 本地兜底
     with tempfile.TemporaryDirectory(prefix="fallback_") as temp_dir:
         file_path = os.path.join(temp_dir, "solution.py")
         with open(file_path, "w", encoding="utf-8") as f: f.write(request.code)
         try:
             cp = subprocess.run([sys.executable, "-I", "-B", file_path], cwd=temp_dir, capture_output=True, text=True, timeout=request.timeout)
             duration = int((time.perf_counter() - start_time) * 1000)
-            stdout_text = truncate_with_indicator(cp.stdout)
-            stderr_text = truncate_with_indicator(cp.stderr)
-            return asdict(SandboxResult("success" if cp.returncode == 0 else "failed", stdout_text, stderr_text, cp.returncode, False, duration, res_usage))
+            
+            # === 核心修复：截断时长并加上标记词 ===
+            stdout_str = cp.stdout
+            if len(stdout_str) > MAX_OUTPUT_CHARS:
+                stdout_str = stdout_str[:MAX_OUTPUT_CHARS] + "\n...[Output Truncated]"
+                
+            stderr_str = cp.stderr
+            if len(stderr_str) > MAX_OUTPUT_CHARS:
+                stderr_str = stderr_str[:MAX_OUTPUT_CHARS] + "\n...[Output Truncated]"
+            # ==================================
+
+            return asdict(SandboxResult("success" if cp.returncode == 0 else "failed", stdout_str, stderr_str, cp.returncode, False, duration, res_usage))
         except subprocess.TimeoutExpired:
             return asdict(SandboxResult("timeout", "", "Execution Timeout", 124, True, int(request.timeout*1000), res_usage))
         except Exception as e:

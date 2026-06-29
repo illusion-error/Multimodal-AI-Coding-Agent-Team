@@ -27,17 +27,16 @@ def test_runner_output_truncation():
     assert len(res["stdout"]) < 10100 
     assert "[Output Truncated" in res["stdout"]
 
-# === 修复 1：将禁网测试拆分，绕过 AST 静态拦截 ===
 @pytest.mark.skipif(not DOCKER_AVAILABLE, reason="禁网测试需要真实的 Docker 环境支持")
 def test_runner_network_isolation():
-    """专项测试：物理网络隔离 (断网) - 使用 eval 绕过静态 AST 检查以测试真实 Docker 隔离"""
+    """专项测试：物理网络隔离 (断网) - 使用 skip_static_validation 强测底层 Docker"""
     
-    # 静态安全拦截测试
+    # 静态安全拦截测试 (默认走 AST 拦截)
     req_static = SandboxRequest(code="import urllib.request\nurllib.request.urlopen('http://www.baidu.com')", network=False)
     res_static = execute_code_safely(req_static)
-    assert res_static["status"] == "blocked" # 第一类：静态拦截成功
+    assert res_static["status"] == "blocked"
 
-    # 物理网络拦截测试 (黑魔法绕过 AST，强行发包)
+    # === 核心修复 3：真实 Docker 物理断网测试 ===
     code = """
 import urllib.request
 try:
@@ -45,18 +44,21 @@ try:
 except Exception as e:
     print(f"Network_Error: {type(e).__name__}")
 """
-    # 强制不许 fallback，必须用 docker 测
-    req_physical = SandboxRequest(code=code, network=False, force_docker=True)
+    # 加入 skip_static_validation=True，穿透第一层防御，直击 Docker
+    req_physical = SandboxRequest(
+        code=code, network=False, 
+        force_docker=True, skip_static_validation=True
+    )
     res_physical = execute_code_safely(req_physical)
     
     assert res_physical["status"] == "success" 
-    assert "Network_Error" in res_physical["stdout"] or "URLError" in res_physical["stderr"]
+    assert "Network_Error" in res_physical["stdout"]
 
 @pytest.mark.skipif(not DOCKER_AVAILABLE, reason="OOM 测试需要真实的 Docker 资源限制支持")
 def test_runner_oom_kill():
     """专项测试：内存超限 (OOM) 物理强杀"""
     code = "a = [1] * (10**8)"
-    req = SandboxRequest(code=code, memory_mb=64, force_docker=True) # 强制必须 Docker 执行
+    req = SandboxRequest(code=code, memory_mb=64, force_docker=True, skip_static_validation=True) 
     res = execute_code_safely(req)
     
     assert res["status"] == "failed"
