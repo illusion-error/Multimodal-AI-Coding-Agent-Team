@@ -9,6 +9,7 @@
         <el-option label="已完成" value="completed" />
         <el-option label="执行中" value="running" />
         <el-option label="失败" value="failed" />
+        <el-option label="已取消" value="cancelled" />
       </el-select>
       <el-input 
         v-model="searchKeyword" 
@@ -35,11 +36,13 @@
       </el-table-column>
       <el-table-column prop="created_at" label="创建时间" width="180" />
       <el-table-column prop="total_ms" label="耗时(ms)" width="100" />
-      <el-table-column label="操作" width="220">
+      <el-table-column label="操作" width="280">
         <template #default="{ row }">
-          <el-button size="small" @click="viewDetail(row.task_id)">查看详情</el-button>
+          <el-button size="small" type="primary" @click="viewDetail(row.task_id)">
+            📋 查看详情
+          </el-button>
           <el-button size="small" type="success" @click="downloadReport(row.task_id)">
-            下载报告
+            📥 下载报告
           </el-button>
         </template>
       </el-table-column>
@@ -53,6 +56,13 @@
       :close-on-click-modal="false"
     >
       <div v-if="detailData" class="detail-content">
+        <div class="info-grid">
+          <div class="info-item"><span class="label">任务ID</span><span class="value">{{ detailData.task_id }}</span></div>
+          <div class="info-item"><span class="label">状态</span><span class="value">{{ detailData.status }}</span></div>
+          <div class="info-item"><span class="label">总耗时</span><span class="value">{{ detailData.total_ms || 0 }}ms</span></div>
+          <div class="info-item"><span class="label">模型</span><span class="value">{{ detailData.selected_model || '—' }}</span></div>
+        </div>
+        
         <h4>📋 题意识别</h4>
         <p>{{ detailData.problem || '—' }}</p>
         
@@ -73,8 +83,11 @@
       </div>
       <template #footer>
         <el-button @click="dialogVisible = false">关闭</el-button>
-        <el-button type="primary" @click="downloadReport(currentTaskId)">
-          下载报告
+        <el-button type="primary" @click="goToTaskDetail(currentTaskId)">
+          📋 查看完整详情
+        </el-button>
+        <el-button type="success" @click="downloadReport(currentTaskId)">
+          📥 下载报告
         </el-button>
       </template>
     </el-dialog>
@@ -83,10 +96,12 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getTaskList, getTaskDetail, getTaskReport, getTaskSteps, handleApiError } from '../api/task'
 import AgentSteps from '../components/AgentSteps.vue'
 
+const router = useRouter()
 const loading = ref(false)
 const taskList = ref([])
 const filterStatus = ref('')
@@ -115,7 +130,8 @@ const getStatusType = (status) => {
     'completed': 'success',
     'running': 'warning',
     'failed': 'danger',
-    'pending': 'info'
+    'pending': 'info',
+    'cancelled': 'info'
   }
   return map[status] || 'info'
 }
@@ -138,7 +154,6 @@ const fetchHistory = async () => {
 const viewDetail = async (taskId) => {
   currentTaskId.value = taskId
   try {
-    // 先获取任务详情
     const detailRes = await getTaskDetail(taskId)
     
     if (detailRes.data.code === 0) {
@@ -148,7 +163,6 @@ const viewDetail = async (taskId) => {
       return
     }
     
-    // 单独获取 Agent 步骤（失败不影响详情显示）
     try {
       const stepsRes = await getTaskSteps(taskId)
       if (stepsRes.data && stepsRes.data.code === 0) {
@@ -157,7 +171,6 @@ const viewDetail = async (taskId) => {
         detailSteps.value = []
       }
     } catch (stepsError) {
-      // 步骤接口 404 或其他错误，静默处理
       detailSteps.value = []
       console.log('Agent步骤接口暂未实现或获取失败')
     }
@@ -167,6 +180,11 @@ const viewDetail = async (taskId) => {
     console.error('加载详情失败:', error)
     ElMessage.error(handleApiError(error, '加载详情失败'))
   }
+}
+
+const goToTaskDetail = (taskId) => {
+  dialogVisible.value = false
+  router.push(`/task/${taskId}`)
 }
 
 const downloadReport = async (taskId) => {
@@ -213,4 +231,16 @@ onMounted(fetchHistory)
   font-size: 13px;
 }
 .empty-steps { padding: 10px 0; }
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.info-item {
+  display: flex;
+  flex-direction: column;
+}
+.info-item .label { font-size: 12px; color: #909399; }
+.info-item .value { font-size: 14px; font-weight: 500; color: #303133; }
 </style>

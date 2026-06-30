@@ -7,82 +7,65 @@ const api = axios.create({
   timeout: 60000,
 })
 
-const apiKeyConfig = (apiKey = '') => {
-  const value = apiKey.trim()
-  return value
-    ? { headers: { 'X-DashScope-API-Key': value } }
-    : {}
-}
-
 // ===== 基础接口 =====
 export const healthCheck = () => api.get('/api/health')
 
-export const createTextTask = (problemText, apiKey = '') => {
-  return api.post(
-    '/api/tasks/text',
-    { problem_text: problemText },
-    {
-      ...apiKeyConfig(apiKey),
-      headers: {
-        ...apiKeyConfig(apiKey).headers,
-        'Content-Type': 'application/json; charset=UTF-8',
-      },
-    },
-  )
+export const createTextTask = (problemText) => {
+  return api.post('/api/tasks/text', { problem_text: problemText })
 }
 
-export const createImageTask = (imageFile, supplementText = '', apiKey = '') => {
+export const createImageTask = (imageFile, supplementText = '') => {
   const formData = new FormData()
   formData.append('image', imageFile)
   formData.append('supplement', supplementText)
-  const config = apiKeyConfig(apiKey)
   return api.post('/api/tasks/image', formData, {
-    ...config,
-    headers: {
-      ...config.headers,
-      'Content-Type': 'multipart/form-data',
-    },
+    headers: { 'Content-Type': 'multipart/form-data' },
   })
 }
 
 // ===== 任务相关 =====
 export const getTaskList = () => api.get('/api/tasks')
 export const getTaskDetail = (taskId) => api.get(`/api/tasks/${taskId}`)
-export const getTaskReport = (taskId) => api.get(`/api/tasks/${taskId}/report`, {
-  responseType: 'text',
-})
+export const getTaskReport = (taskId) => api.get(`/api/tasks/${taskId}/report`)
 
 // ===== Agent 步骤 =====
 export const getTaskSteps = (taskId) => api.get(`/api/tasks/${taskId}/steps`)
 
 // ===== 测试用例 =====
 export const getTaskTests = (taskId) => api.get(`/api/tasks/${taskId}/tests`)
+
+// ===== 修复记录 =====
 export const getTaskRepairs = (taskId) => api.get(`/api/tasks/${taskId}/repairs`)
 
 // ===== 指标看板 =====
 export const getMetricsSummary = () => api.get('/api/metrics/summary')
 
 // ===== 重新执行 =====
-export const rerunTask = (taskId, apiKey = '') => (
-  api.post(`/api/tasks/${taskId}/rerun`, null, apiKeyConfig(apiKey))
-)
+export const rerunTask = (taskId) => api.post(`/api/tasks/${taskId}/rerun`)
 
 // ===== Trace 详情 =====
 export const getTaskTrace = (taskId) => api.get(`/api/tasks/${taskId}/trace`)
 
-// ===== Prompt 版本列表 =====
-export const getPromptVersions = () => api.get('/api/prompt/versions')
-
-// ===== 更新 Prompt 版本 =====
+// ===== Prompt 版本 =====
+export const getPromptVersions = (agentName = '') => {
+  const url = agentName ? `/api/prompt/versions?agent_name=${agentName}` : '/api/prompt/versions'
+  return api.get(url)
+}
 export const updatePromptVersion = (agentName, version) => {
   return api.post('/api/prompt/version', { agent_name: agentName, version })
 }
 
-// ===== Benchmark 数据 =====
+// ===== Benchmark =====
+export const startBenchmarkRun = () => api.post('/api/benchmark/runs')
+export const getBenchmarkStatus = (runId) => api.get(`/api/benchmark/runs/${runId}`)
+export const getBenchmarkResults = () => api.get('/api/benchmark/results')
 export const getBenchmarkData = () => api.get('/api/benchmark/results')
 
+// ===== 取消任务 =====
+export const cancelTask = (taskId) => api.post(`/api/tasks/${taskId}/cancel`)
+
 // ===== 轮询任务状态 =====
-export const pollTaskStatus = async (taskId, interval = 2000, maxAttempts = 180) => {
+export const pollTaskStatus = async (taskId, interval = 2000, maxAttempts = 60) => {
   let attempts = 0
   return new Promise((resolve, reject) => {
     const timer = setInterval(async () => {
@@ -90,7 +73,7 @@ export const pollTaskStatus = async (taskId, interval = 2000, maxAttempts = 180)
       try {
         const response = await getTaskDetail(taskId)
         const data = response.data.data
-        if (data.status === 'completed' || data.status === 'failed') {
+        if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
           clearInterval(timer)
           resolve(data)
         } else if (attempts >= maxAttempts) {
@@ -118,9 +101,9 @@ export const handleApiError = (error, defaultMessage = '请求失败') => {
     } else if (status === 401 || status === 403) {
       return '权限不足，请检查配置'
     } else if (status === 400) {
-      return error.response.data?.message || error.response.data?.detail || '请求参数错误'
+      return error.response.data?.message || '请求参数错误'
     }
-    return error.response.data?.message || error.response.data?.detail || defaultMessage
+    return error.response.data?.message || defaultMessage
   } else if (error.code === 'ECONNABORTED') {
     return '请求超时，请检查网络或稍后重试'
   } else if (error.message?.includes('Network Error')) {
@@ -129,10 +112,10 @@ export const handleApiError = (error, defaultMessage = '请求失败') => {
   return defaultMessage
 }
 
-// ===== 带友好提示的图片上传 =====
-export const uploadImageWithFallback = async (imageFile, supplementText = '', apiKey = '') => {
+// ===== 图片上传封装 =====
+export const uploadImageWithFallback = async (imageFile, supplementText = '') => {
   try {
-    const response = await createImageTask(imageFile, supplementText, apiKey)
+    const response = await createImageTask(imageFile, supplementText)
     return response
   } catch (error) {
     if (error.response && error.response.status === 404) {
