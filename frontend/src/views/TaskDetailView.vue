@@ -71,14 +71,34 @@
         <el-divider />
         <h3>🧪 测试用例</h3>
         <el-table :data="testCases" size="small" v-if="testCases.length > 0">
-          <el-table-column prop="input" label="输入" min-width="120" />
-          <el-table-column prop="expected" label="期望输出" min-width="120" />
-          <el-table-column prop="actual" label="实际输出" min-width="120" />
-          <el-table-column prop="passed" label="通过" width="80">
+          <el-table-column prop="input" label="输入" min-width="100" />
+          <el-table-column prop="expected" label="期望输出" min-width="100" />
+          <el-table-column prop="actual" label="实际输出" min-width="100" />
+          <el-table-column label="来源" width="100">
+            <template #default="{ row }">
+              <el-tag :type="row.trusted ? 'success' : 'warning'" size="small">
+                {{ row.trusted ? '系统权威' : '模型建议' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="80">
+            <template #default="{ row }">
+              <el-tag :type="row.validation_status === 'verified' ? 'success' : 'warning'" size="small">
+                {{ row.validation_status === 'verified' ? '已验证' : '待确认' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="passed" label="结果" width="70">
             <template #default="{ row }">
               <el-tag :type="row.passed ? 'success' : 'danger'" size="small">
                 {{ row.passed ? '✅' : '❌' }}
               </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="duration_ms" label="耗时(ms)" width="80" />
+          <el-table-column prop="error" label="错误" min-width="120">
+            <template #default="{ row }">
+              <span style="color: #EF9A9A; font-size: 12px;">{{ row.error || '—' }}</span>
             </template>
           </el-table-column>
         </el-table>
@@ -103,6 +123,10 @@
           <div class="info-item">
             <span class="label">估算成本</span>
             <span class="value">{{ task.estimated_cost !== undefined ? '$' + task.estimated_cost : 'unknown' }}</span>
+          </div>
+          <div class="info-item" v-if="task.cache_hit !== undefined">
+            <span class="label">缓存命中</span>
+            <span class="value">{{ task.cache_hit ? '是' : '否' }}</span>
           </div>
         </div>
 
