@@ -133,7 +133,7 @@
             <span class="value">
               <span v-if="task.prompt_versions && typeof task.prompt_versions === 'object'">
                 <span v-for="(version, agent) in task.prompt_versions" :key="agent" style="display: block; font-size: 13px;">
-                  {{ agent }}: {{ version }}
+                  {{ agentLabel(agent) }}: {{ version }}
                 </span>
               </span>
               <span v-else>{{ task.prompt_version || '—' }}</span>
@@ -179,6 +179,16 @@ const task = ref(null)
 const agentSteps = ref([])
 const traceData = ref({})
 const rerunLoading = ref(false)
+
+const AGENT_LABELS = {
+  ProblemRecognizer: '\u9898\u76ee\u8bc6\u522b',
+  Planner: '\u89e3\u9898\u89c4\u5212',
+  TestGenerator: '\u6d4b\u8bd5\u751f\u6210',
+  CodeGenerator: '\u4ee3\u7801\u751f\u6210',
+  Debugger: '\u6267\u884c\u8c03\u8bd5'
+}
+
+const agentLabel = (agent) => AGENT_LABELS[agent] || agent
 
 const testCases = computed(() => {
   return task.value?.test_cases || []

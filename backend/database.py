@@ -22,6 +22,58 @@ def _database_path() -> Path:
 
 DB_PATH = _database_path()
 
+DEFAULT_PROMPT_VERSIONS = [
+    {
+        "agent_name": "ProblemRecognizer",
+        "version": "v1.0",
+        "content": (
+            "Recognize the programming problem from text or image input. "
+            "Extract the original statement, input/output requirements, "
+            "constraints, and semantic contract without inventing missing facts."
+        ),
+        "change_log": "Default prompt for problem recognition.",
+    },
+    {
+        "agent_name": "Planner",
+        "version": "v1.0",
+        "content": (
+            "Plan the solution from the recognized semantic contract and RAG "
+            "templates. Explain algorithm choice, edge cases, and complexity."
+        ),
+        "change_log": "Default prompt for solution planning.",
+    },
+    {
+        "agent_name": "TestGenerator",
+        "version": "v1.0",
+        "content": (
+            "Generate test cases only from trusted semantic contracts and "
+            "system templates. Model-suggested tests must stay untrusted until "
+            "verified by the evaluator."
+        ),
+        "change_log": "Default prompt for test generation with anti-drift rules.",
+    },
+    {
+        "agent_name": "CodeGenerator",
+        "version": "v1.0",
+        "content": (
+            "Generate Python 3 solution code according to the plan, contract, "
+            "retrieved templates, and trusted tests. Keep the public function "
+            "signature compatible with the evaluator."
+        ),
+        "change_log": "Default prompt for code generation.",
+    },
+    {
+        "agent_name": "Debugger",
+        "version": "v1.0",
+        "content": (
+            "Analyze execution logs and failed trusted tests. Repair code at "
+            "most three rounds, never overwrite trusted expected outputs, and "
+            "return manual_review when the contract is insufficient."
+        ),
+        "change_log": "Default prompt for execution debugging and repair.",
+    },
+]
+
 
 def utc_now() -> str:
     return datetime.now().isoformat(timespec="milliseconds")
@@ -44,6 +96,41 @@ def _ensure_column(conn: sqlite3.Connection, table: str, definition: str) -> Non
     name = definition.split()[0]
     if name not in _table_columns(conn, table):
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
+
+
+def _seed_default_prompt_versions(conn: sqlite3.Connection) -> None:
+    """Ensure a fresh database exposes prompt versions for every Agent."""
+    for item in DEFAULT_PROMPT_VERSIONS:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO prompt_versions
+                (agent_name, version, content, is_enabled, change_log)
+            VALUES (?, ?, ?, 1, ?)
+            """,
+            (
+                item["agent_name"],
+                item["version"],
+                item["content"],
+                item["change_log"],
+            ),
+        )
+        enabled_count = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM prompt_versions
+            WHERE agent_name = ? AND is_enabled = 1
+            """,
+            (item["agent_name"],),
+        ).fetchone()["count"]
+        if enabled_count == 0:
+            conn.execute(
+                """
+                UPDATE prompt_versions
+                SET is_enabled = 1
+                WHERE agent_name = ? AND version = ?
+                """,
+                (item["agent_name"], item["version"]),
+            )
 
 
 def init_db() -> None:
@@ -313,6 +400,7 @@ def init_db() -> None:
                 ON code_cache(cache_type);
             """
         )
+        _seed_default_prompt_versions(conn)
 
 
 def create_task(

@@ -11,14 +11,29 @@ from backend.database import init_db, generate_trace_id, get_conn
 
 client = TestClient(app)
 
-def test_prompt_versions_empty():
-    """测试空数据库返回空数组"""
+def test_prompt_versions_seeded():
+    """Fresh databases expose default prompt versions for all workflow Agents."""
     init_db()
     response = client.get("/api/prompt/versions")
     assert response.status_code == 200
     data = response.json()
     assert data['code'] == 0
     assert isinstance(data['data'], list)
+    agent_names = {item["agent_name"] for item in data["data"]}
+    required_agents = {
+        "ProblemRecognizer",
+        "Planner",
+        "TestGenerator",
+        "CodeGenerator",
+        "Debugger",
+    }
+    assert required_agents.issubset(agent_names)
+    enabled_defaults = {
+        item["agent_name"]
+        for item in data["data"]
+        if item.get("version") == "v1.0" and item.get("is_enabled")
+    }
+    assert required_agents.issubset(enabled_defaults)
 
 def test_switch_version_not_found():
     """测试切换不存在的版本返回 404"""

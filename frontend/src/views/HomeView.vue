@@ -7,8 +7,8 @@
 
     <!-- ===== 修改点1：移除 v-if，始终显示 Prompt 版本控制栏 ===== -->
     <div class="control-bar">
-      <div class="control-group" v-for="agent in promptAgents" :key="agent">
-        <span class="control-label">{{ agent }}</span>
+      <div class="control-group" v-for="agent in promptAgentKeys" :key="agent">
+        <span class="control-label">{{ agentLabel(agent) }}</span>
         <el-select 
           v-model="selectedPromptVersions[agent]" 
           placeholder="选择版本" 
@@ -18,8 +18,8 @@
         >
           <el-option 
             v-for="v in getVersionsByAgent(agent)" 
-            :key="v.version" 
-            :label="v.version + (v.is_enabled ? ' ✓' : '')" 
+            :key="`${v.agent_name}-${v.version}`"
+            :label="promptVersionLabel(v)"
             :value="v.version" 
           />
         </el-select>
@@ -257,8 +257,40 @@ const traceData = ref({})
 const stage2Enabled = true  // 直接强制开启，不再读取环境变量
 
 // ===== Prompt 版本相关 =====
-const promptAgents = ref(['题目识别', '解题规划', '测试生成', '代码生成', '执行调试'])
 const selectedPromptVersions = ref({})
+
+const AGENT_LABELS = {
+  ProblemRecognizer: '\u9898\u76ee\u8bc6\u522b',
+  Planner: '\u89e3\u9898\u89c4\u5212',
+  TestGenerator: '\u6d4b\u8bd5\u751f\u6210',
+  CodeGenerator: '\u4ee3\u7801\u751f\u6210',
+  Debugger: '\u6267\u884c\u8c03\u8bd5'
+}
+
+const AGENT_ORDER = Object.keys(AGENT_LABELS)
+const promptAgentKeys = computed(() => {
+  const names = [...new Set(promptVersions.value.map(v => v.agent_name).filter(Boolean))]
+  const ordered = AGENT_ORDER.filter(agent => names.includes(agent))
+  const extras = names.filter(agent => !AGENT_ORDER.includes(agent)).sort()
+  return [...ordered, ...extras]
+})
+
+const agentLabel = (agent) => AGENT_LABELS[agent] || agent
+
+const promptVersionLabel = (versionInfo) => {
+  const suffix = versionInfo?.is_enabled ? ' \u2713' : ''
+  return `${versionInfo?.version || ''}${suffix}`
+}
+
+const formatPromptVersions = (versions) => {
+  if (!versions) return '\u2014'
+  if (typeof versions === 'string') return versions || '\u2014'
+  const entries = Object.entries(versions)
+  if (entries.length === 0) return '\u2014'
+  return entries
+    .map(([agent, version]) => `${agentLabel(agent)}:${version}`)
+    .join(' / ')
+}
 
 const getVersionsByAgent = (agent) => {
   return promptVersions.value.filter(v => v.agent_name === agent)
@@ -271,7 +303,7 @@ const loadPromptVersions = async () => {
       const versions = response.data.data || []
       promptVersions.value = versions
       // 初始化每个 Agent 的当前版本
-      promptAgents.value.forEach(agent => {
+      promptAgentKeys.value.forEach(agent => {
         const agentVersions = versions.filter(v => v.agent_name === agent)
         if (agentVersions.length > 0) {
           const active = agentVersions.find(v => v.is_enabled)
@@ -297,7 +329,7 @@ const applyPromptVersion = async (agentName, version) => {
   }
   try {
     await updatePromptVersion(agentName, version)
-    ElMessage.success(`${agentName} 已切换到版本 ${version}`)
+    ElMessage.success(`${agentLabel(agentName)} 已切换到版本 ${version}`)
     await loadPromptVersions()
   } catch (error) {
     console.error('切换版本失败:', error)
@@ -323,7 +355,7 @@ const deployItems = computed(() => {
   ]
   if (stage2Enabled) {
     items.push({ label: '使用模型', value: result.value?.selected_model || result.value?.model_name || '—', unit: '' })
-    items.push({ label: 'Prompt 版本', value: result.value?.prompt_version || '—', unit: '' })
+    items.push({ label: 'Prompt 版本', value: formatPromptVersions(result.value?.prompt_versions || result.value?.prompt_version), unit: '' })
   }
   return items
 })
