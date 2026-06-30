@@ -5,8 +5,8 @@
       <p class="hero-sub">输入编程题目，AI 自动生成解法、执行测试、输出报告</p>
     </div>
 
-    <!-- Prompt 版本控制栏 -->
-    <div v-if="stage2Enabled" class="control-bar">
+    <!-- ===== 修改点1：移除 v-if，始终显示 Prompt 版本控制栏 ===== -->
+    <div class="control-bar">
       <div class="control-group" v-for="agent in promptAgents" :key="agent">
         <span class="control-label">{{ agent }}</span>
         <el-select 
@@ -209,7 +209,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, onUnmounted, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
 import { 
@@ -252,7 +252,9 @@ const activeTab = ref('problem')
 const promptVersions = ref([])
 const currentModel = ref('')
 const traceData = ref({})
-const stage2Enabled = import.meta.env.VITE_ENABLE_STAGE2 === 'true'
+
+// ===== 修改点2：强制开启 Stage2（忽略环境变量） =====
+const stage2Enabled = true  // 直接强制开启，不再读取环境变量
 
 // ===== Prompt 版本相关 =====
 const promptAgents = ref(['题目识别', '解题规划', '测试生成', '代码生成', '执行调试'])
@@ -263,7 +265,6 @@ const getVersionsByAgent = (agent) => {
 }
 
 const loadPromptVersions = async () => {
-  if (!stage2Enabled) return
   try {
     const response = await getPromptVersions()
     if (response.data.code === 0) {
@@ -276,26 +277,40 @@ const loadPromptVersions = async () => {
           const active = agentVersions.find(v => v.is_enabled)
           if (active) {
             selectedPromptVersions.value[agent] = active.version
+          } else {
+            // 如果没有启用版本，默认选中第一个
+            selectedPromptVersions.value[agent] = agentVersions[0]?.version || ''
           }
         }
       })
     }
-  } catch {
+  } catch (error) {
+    console.error('加载 Prompt 版本失败:', error)
     promptVersions.value = []
   }
 }
 
 const applyPromptVersion = async (agentName, version) => {
-  if (!version) { ElMessage.warning('请选择版本'); return }
+  if (!version) { 
+    ElMessage.warning('请选择版本')
+    return 
+  }
   try {
     await updatePromptVersion(agentName, version)
     ElMessage.success(`${agentName} 已切换到版本 ${version}`)
     await loadPromptVersions()
-  } catch {
-    ElMessage.error('切换版本失败')
+  } catch (error) {
+    console.error('切换版本失败:', error)
+    ElMessage.error('切换版本失败，请检查后端服务')
   }
 }
 // ===== Prompt 版本结束 =====
+
+// ===== 修改点3：在组件挂载时加载版本 =====
+onMounted(() => {
+  loadPromptVersions()
+})
+// ===== 修改点结束 =====
 
 let progressTimer = null
 
@@ -520,13 +535,11 @@ const handleRerun = async () => {
   }
 }
 
-// 加载 Prompt 版本
-loadPromptVersions()
-
 onUnmounted(() => { if (progressTimer) clearInterval(progressTimer) })
 </script>
 
 <style scoped>
+/* 原有样式保持不变 */
 .home-container {
   max-width: 1200px;
   margin: 0 auto;
