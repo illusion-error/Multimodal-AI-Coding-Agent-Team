@@ -128,6 +128,17 @@
             <span class="label">缓存命中</span>
             <span class="value">{{ task.cache_hit ? '是' : '否' }}</span>
           </div>
+          <div class="info-item">
+            <span class="label">Prompt 版本</span>
+            <span class="value">
+              <span v-if="task.prompt_versions && typeof task.prompt_versions === 'object'">
+                <span v-for="(version, agent) in task.prompt_versions" :key="agent" style="display: block; font-size: 13px;">
+                  {{ agent }}: {{ version }}
+                </span>
+              </span>
+              <span v-else>{{ task.prompt_version || '—' }}</span>
+            </span>
+          </div>
         </div>
 
         <!-- Agent Timeline -->

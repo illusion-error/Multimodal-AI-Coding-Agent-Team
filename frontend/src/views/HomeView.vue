@@ -5,13 +5,24 @@
       <p class="hero-sub">输入编程题目，AI 自动生成解法、执行测试、输出报告</p>
     </div>
 
+    <!-- Prompt 版本控制栏 -->
     <div v-if="stage2Enabled" class="control-bar">
-      <div class="control-group">
-        <span class="control-label">Prompt 版本</span>
-        <el-select v-model="selectedPromptVersion" placeholder="选择版本" size="small" style="width: 140px">
-          <el-option v-for="v in promptVersions" :key="v.version" :label="v.version + (v.is_enabled ? ' ✓' : '')" :value="v.version" />
+      <div class="control-group" v-for="agent in promptAgents" :key="agent">
+        <span class="control-label">{{ agent }}</span>
+        <el-select 
+          v-model="selectedPromptVersions[agent]" 
+          placeholder="选择版本" 
+          size="small" 
+          style="width: 140px"
+          @change="applyPromptVersion(agent, selectedPromptVersions[agent])"
+        >
+          <el-option 
+            v-for="v in getVersionsByAgent(agent)" 
+            :key="v.version" 
+            :label="v.version + (v.is_enabled ? ' ✓' : '')" 
+            :value="v.version" 
+          />
         </el-select>
-        <el-button size="small" type="primary" @click="applyPromptVersion">应用</el-button>
       </div>
       <div class="control-group" v-if="currentModel">
         <span class="control-label">当前模型</span>
@@ -238,11 +249,54 @@ const progress = ref(0)
 const progressStatus = ref('')
 const progressHint = ref('')
 const activeTab = ref('problem')
-const selectedPromptVersion = ref('')
 const promptVersions = ref([])
 const currentModel = ref('')
 const traceData = ref({})
 const stage2Enabled = import.meta.env.VITE_ENABLE_STAGE2 === 'true'
+
+// ===== Prompt 版本相关 =====
+const promptAgents = ref(['题目识别', '解题规划', '测试生成', '代码生成', '执行调试'])
+const selectedPromptVersions = ref({})
+
+const getVersionsByAgent = (agent) => {
+  return promptVersions.value.filter(v => v.agent_name === agent)
+}
+
+const loadPromptVersions = async () => {
+  if (!stage2Enabled) return
+  try {
+    const response = await getPromptVersions()
+    if (response.data.code === 0) {
+      const versions = response.data.data || []
+      promptVersions.value = versions
+      // 初始化每个 Agent 的当前版本
+      promptAgents.value.forEach(agent => {
+        const agentVersions = versions.filter(v => v.agent_name === agent)
+        if (agentVersions.length > 0) {
+          const active = agentVersions.find(v => v.is_enabled)
+          if (active) {
+            selectedPromptVersions.value[agent] = active.version
+          }
+        }
+      })
+    }
+  } catch {
+    promptVersions.value = []
+  }
+}
+
+const applyPromptVersion = async (agentName, version) => {
+  if (!version) { ElMessage.warning('请选择版本'); return }
+  try {
+    await updatePromptVersion(agentName, version)
+    ElMessage.success(`${agentName} 已切换到版本 ${version}`)
+    await loadPromptVersions()
+  } catch {
+    ElMessage.error('切换版本失败')
+  }
+}
+// ===== Prompt 版本结束 =====
+
 let progressTimer = null
 
 const deployItems = computed(() => {
@@ -263,29 +317,6 @@ const renderedProblem = computed(() => result.value ? marked(result.value.proble
 const renderedSolution = computed(() => result.value ? marked(result.value.solution_markdown || '—') : '')
 const renderedDocument = computed(() => result.value ? marked(result.value.project_document || '暂无项目文档。') : '')
 const codeLines = computed(() => result.value?.code ? result.value.code.split('\n') : [])
-
-const loadPromptVersions = async () => {
-  if (!stage2Enabled) return
-  try {
-    const response = await getPromptVersions()
-    if (response.data.code === 0) {
-      promptVersions.value = response.data.data || []
-      const active = promptVersions.value.find(v => v.is_enabled)
-      if (active) selectedPromptVersion.value = active.version
-    }
-  } catch {
-    promptVersions.value = [{ version: 'v1.0', is_enabled: true }]
-    selectedPromptVersion.value = 'v1.0'
-  }
-}
-
-const applyPromptVersion = async () => {
-  if (!selectedPromptVersion.value) { ElMessage.warning('请选择版本'); return }
-  try {
-    await updatePromptVersion('CodeGenerator', selectedPromptVersion.value)
-    ElMessage.success(`已切换到 Prompt 版本 ${selectedPromptVersion.value}`)
-  } catch { ElMessage.error('切换版本失败') }
-}
 
 const handleFileChange = (file) => {
   const allowedTypes = ['image/png', 'image/jpeg', 'image/webp']
@@ -395,7 +426,7 @@ const submitTask = async () => {
       finalResult.fallback_used = Boolean(finalResult.fallback_used)
       finalResult.notes = finalResult.notes || '请确保输入符合题目要求，代码在 Python 3.10+ 环境中运行。'
       finalResult.selected_model = finalResult.selected_model || finalResult.model_name || '—'
-      finalResult.prompt_version = finalResult.prompt_version || selectedPromptVersion.value || '—'
+      finalResult.prompt_version = finalResult.prompt_version || '—'
       result.value = finalResult
       currentModel.value = finalResult.selected_model
 
@@ -489,7 +520,9 @@ const handleRerun = async () => {
   }
 }
 
+// 加载 Prompt 版本
 loadPromptVersions()
+
 onUnmounted(() => { if (progressTimer) clearInterval(progressTimer) })
 </script>
 
