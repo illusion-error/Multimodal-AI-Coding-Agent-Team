@@ -1,0 +1,69 @@
+/* src/styles/theme.css */
+/* 简约灰白主题 - 覆盖 Element Plus 默认颜色 */
+
+:root {
+  /* 主色 - 灰蓝色，高级感 */
+  --el-color-primary: #6B7A8F;
+  --el-color-primary-light-3: #8A9AAD;
+  --el-color-primary-light-5: #A8B5C5;
+  --el-color-primary-light-7: #C5CFDB;
+  --el-color-primary-light-9: #E8ECF1;
+
+  /* 成功/警告/危险 - 柔和版 */
+  --el-color-success: #6B8F7A;
+  --el-color-warning: #C4A86B;
+  --el-color-danger: #B57A7A;
+
+  /* 背景色 - 极浅灰 */
+  --el-bg-color: #F8F9FA;
+  --el-bg-color-page: #F0F2F5;
+
+  /* 文字颜色 - 深灰，不刺眼 */
+  --el-text-color-primary: #2C3E50;
+  --el-text-color-regular: #4A5A6A;
+  --el-text-color-secondary: #7A8A9A;
+
+  /* 边框色 - 柔和 */
+  --el-border-color: #E4E7ED;
+  --el-border-color-light: #EBEEF2;
+
+  /* 圆角 - 稍大，更现代 */
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 6px;
+  --el-border-radius-round: 20px;
+
+  /* 阴影 - 更柔和 */
+  --el-box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+  --el-box-shadow-light: 0 4px 20px rgba(0, 0, 0, 0.04);
+}
+
+/* 卡片样式微调 */
+.el-card {
+  border-radius: 12px !important;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.04) !important;
+}
+
+/* 按钮样式微调 */
+.el-button--primary {
+  background-color: var(--el-color-primary) !important;
+  border-color: var(--el-color-primary) !important;
+}
+.el-button--primary:hover {
+  background-color: var(--el-color-primary-light-3) !important;
+  border-color: var(--el-color-primary-light-3) !important;
+}
+
+/* 输入框聚焦效果 */
+.el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 2px rgba(107, 122, 143, 0.15) !important;
+}
+
+/* Tag 样式 */
+.el-tag {
+  border: none !important;
+  font-weight: 500 !important;
+}
+.el-tag--success { background: #E8F0EC !important; color: #6B8F7A !important; }
+.el-tag--danger { background: #F0E8E8 !important; color: #B57A7A !important; }
+.el-tag--warning { background: #F0ECE8 !important; color: #C4A86B !important; }
+.el-tag--info { background: #E8ECF0 !important; color: #6B7A8F !important; }

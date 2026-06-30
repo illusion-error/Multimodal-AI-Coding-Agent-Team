@@ -1,30 +1,28 @@
-<!-- src/views/HomeView.vue -->
 <template>
   <div class="home-container">
-    <h1>🧠 多模态代码生成 Agent</h1>
+    <!-- 大标题 -->
+    <div class="hero">
+      <h1 class="hero-title">多模态代码生成 Agent</h1>
+      <p class="hero-sub">输入编程题目，AI 自动生成解法、执行测试、输出报告</p>
+    </div>
 
-    <!-- 控制栏：Prompt 版本选择 + 模型路由 -->
+    <!-- 控制栏 -->
     <div v-if="stage2Enabled" class="control-bar">
       <div class="control-group">
-        <span class="control-label">Prompt 版本：</span>
+        <span class="control-label">Prompt 版本</span>
         <el-select v-model="selectedPromptVersion" placeholder="选择版本" size="small" style="width: 140px">
-          <el-option
-            v-for="v in promptVersions"
-            :key="v.version"
-            :label="v.version + (v.is_active ? ' (当前)' : '')"
-            :value="v.version"
-          />
+          <el-option v-for="v in promptVersions" :key="v.version" :label="v.version + (v.is_active ? ' ✓' : '')" :value="v.version" />
         </el-select>
         <el-button size="small" type="primary" @click="applyPromptVersion">应用</el-button>
       </div>
       <div class="control-group" v-if="currentModel">
-        <span class="control-label">当前模型：</span>
+        <span class="control-label">当前模型</span>
         <el-tag type="info" size="small">{{ currentModel }}</el-tag>
       </div>
     </div>
 
-    <!-- 输入区 -->
-    <el-card class="input-card">
+    <!-- 输入卡片 -->
+    <div class="glass-card input-area">
       <div class="api-key-row">
         <el-input
           v-model="apiKey"
@@ -37,7 +35,7 @@
           <template #prepend>百炼 API Key</template>
         </el-input>
         <el-tag :type="apiKey.trim() ? 'success' : 'info'">
-          {{ apiKey.trim() ? '本次请求使用自有 Key' : '离线模式' }}
+          {{ apiKey.trim() ? '在线模式' : '离线模式' }}
         </el-tag>
       </div>
 
@@ -46,23 +44,15 @@
         type="textarea"
         :rows="4"
         placeholder="请输入编程题目描述，例如：给定一个整数数组 nums 和一个目标值 target，请你在该数组中找出和为目标值的那两个整数，并返回它们的数组下标。"
+        class="problem-input"
       />
-      
+
       <div class="upload-area">
-        <el-upload
-          ref="uploadRef"
-          action="#"
-          :auto-upload="false"
-          :on-change="handleFileChange"
-          :limit="1"
-          accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
-        >
+        <el-upload ref="uploadRef" action="#" :auto-upload="false" :on-change="handleFileChange" :limit="1" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" class="upload-component">
           <el-button type="primary" plain>📷 上传题目截图</el-button>
         </el-upload>
         <span v-if="uploadFileName" class="file-name">{{ uploadFileName }}</span>
-        <el-button v-if="uploadFileName" type="danger" size="small" @click="clearFile">
-          移除
-        </el-button>
+        <el-button v-if="uploadFileName" type="danger" size="small" plain @click="clearFile">移除</el-button>
       </div>
 
       <el-input
@@ -71,179 +61,83 @@
         class="supplement-input"
       />
 
-      <el-button
-        type="primary"
-        size="large"
-        :loading="loading"
-        @click="submitTask"
-        :disabled="!problemText.trim() && !uploadFile"
-      >
-        {{ loading ? '生成中...' : '🚀 生成解法、执行代码并生成文档' }}
-      </el-button>
-      <el-button :disabled="loading" @click="loadRepairDemo">
-        载入自动修复示例
-      </el-button>
-    </el-card>
+      <div class="btn-row">
+        <el-button type="primary" size="large" :loading="loading" @click="submitTask" :disabled="!problemText.trim() && !uploadFile">
+          {{ loading ? '生成中...' : '🚀 生成解法、执行代码并生成文档' }}
+        </el-button>
+        <el-button size="large" plain class="btn-outline" :disabled="loading" @click="loadRepairDemo">
+          载入自动修复示例
+        </el-button>
+      </div>
+    </div>
 
-    <!-- 任务进度 -->
-    <el-card v-if="loading" class="progress-card">
-      <h3>⏳ 任务执行中</h3>
+    <!-- 进度 -->
+    <div v-if="loading" class="progress-section">
       <el-progress :percentage="progress" :status="progressStatus" />
       <p class="progress-hint">{{ progressHint }}</p>
-    </el-card>
+    </div>
 
-    <!-- 结果区 -->
-    <el-card v-if="result && !loading" class="result-card">
-      <el-alert
-        v-if="result.semantic_verification_status === 'manual_review'"
-        title="代码已运行，但题型缺少系统权威测试，模型建议用例未参与自动修复，请人工确认题意与结果。"
-        type="warning"
-        :closable="false"
-        show-icon
-        class="semantic-alert"
-      />
-      <el-alert
-        v-else-if="result.semantic_verification_status === 'verified'"
-        title="语义契约与系统权威测试均已通过。"
-        type="success"
-        :closable="false"
-        show-icon
-        class="semantic-alert"
-      />
+    <!-- 结果 -->
+    <div v-if="result && !loading" class="result-section">
+      <el-alert v-if="result.semantic_verification_status === 'manual_review'" title="代码已运行，但题型缺少系统权威测试，模型建议用例未参与自动修复，请人工确认题意与结果。" type="warning" :closable="false" show-icon class="semantic-alert" />
+      <el-alert v-else-if="result.semantic_verification_status === 'verified'" title="语义契约与系统权威测试均已通过。" type="success" :closable="false" show-icon class="semantic-alert" />
 
-      <!-- 部署信息卡片 -->
       <div class="deployment-cards">
         <el-row :gutter="16">
-          <el-col :span="stage2Enabled ? 4 : 6">
+          <el-col :span="stage2Enabled ? 4 : 6" v-for="item in deployItems" :key="item.label">
             <div class="deploy-card">
-              <div class="deploy-label">总耗时</div>
-              <div class="deploy-value">{{ result.total_ms || 0 }} <span class="deploy-unit">ms</span></div>
-            </div>
-          </el-col>
-          <el-col :span="stage2Enabled ? 4 : 6">
-            <div class="deploy-card">
-              <div class="deploy-label">API 调用</div>
-              <div class="deploy-value">
-                <el-tag :type="result.api_call ? 'success' : 'info'" size="small">
-                  {{ result.api_call ? '是' : '否' }}
-                </el-tag>
-              </div>
-            </div>
-          </el-col>
-          <el-col :span="stage2Enabled ? 4 : 6">
-            <div class="deploy-card">
-              <div class="deploy-label">兜底输出</div>
-              <div class="deploy-value">
-                <el-tag :type="result.fallback_used ? 'warning' : 'success'" size="small">
-                  {{ result.fallback_used ? '是' : '否' }}
-                </el-tag>
-              </div>
-            </div>
-          </el-col>
-          <el-col :span="stage2Enabled ? 4 : 6">
-            <div class="deploy-card">
-              <div class="deploy-label">代码长度</div>
-              <div class="deploy-value">{{ result.code_length || 0 }} <span class="deploy-unit">字符</span></div>
-            </div>
-          </el-col>
-          <el-col v-if="stage2Enabled" :span="4">
-            <div class="deploy-card">
-              <div class="deploy-label">使用模型</div>
-              <div class="deploy-value" style="font-size: 16px;">
-                <el-tag type="info" size="small">{{ result.model_name || '—' }}</el-tag>
-              </div>
-            </div>
-          </el-col>
-          <el-col v-if="stage2Enabled" :span="4">
-            <div class="deploy-card">
-              <div class="deploy-label">Prompt 版本</div>
-              <div class="deploy-value" style="font-size: 16px;">
-                <el-tag type="warning" size="small">{{ result.prompt_version || '—' }}</el-tag>
-              </div>
+              <div class="deploy-label">{{ item.label }}</div>
+              <div class="deploy-value">{{ item.value }} <span class="deploy-unit">{{ item.unit }}</span></div>
             </div>
           </el-col>
         </el-row>
       </div>
 
-      <!-- Tab 切换 -->
       <el-tabs v-model="activeTab" class="result-tabs">
         <el-tab-pane label="题意识别" name="problem">
           <div class="tab-content">
-            <h4>题意理解</h4>
-            <div class="markdown-body" v-html="renderedProblem"></div>
-            <el-descriptions
-              v-if="result.problem_contract && result.problem_contract.id"
-              title="系统语义契约"
-              :column="1"
-              border
-              class="contract-panel"
-            >
-              <el-descriptions-item label="函数签名">
-                {{ result.problem_contract.signature }}
-              </el-descriptions-item>
-              <el-descriptions-item label="输入">
-                {{ result.problem_contract.input }}
-              </el-descriptions-item>
-              <el-descriptions-item label="输出">
-                {{ result.problem_contract.output }}
-              </el-descriptions-item>
+            <div class="markdown-body" v-html="renderedProblem" />
+            <el-descriptions v-if="result.problem_contract && result.problem_contract.id" title="系统语义契约" :column="1" border class="contract-panel">
+              <el-descriptions-item label="函数签名">{{ result.problem_contract.signature }}</el-descriptions-item>
+              <el-descriptions-item label="输入">{{ result.problem_contract.input }}</el-descriptions-item>
+              <el-descriptions-item label="输出">{{ result.problem_contract.output }}</el-descriptions-item>
               <el-descriptions-item label="不可变规则">
-                <ul class="contract-rules">
-                  <li v-for="rule in result.problem_contract.rules || []" :key="rule">
-                    {{ rule }}
-                  </li>
-                </ul>
+                <ul class="contract-rules"><li v-for="rule in result.problem_contract.rules || []" :key="rule">{{ rule }}</li></ul>
               </el-descriptions-item>
             </el-descriptions>
           </div>
         </el-tab-pane>
-
-        <el-tab-pane label="解题说明" name="solution">
-          <div class="tab-content">
-            <h4>解题思路</h4>
-            <div class="markdown-body" v-html="renderedSolution"></div>
-          </div>
+        <el-tab-pane label="解题思路" name="solution">
+          <div class="tab-content"><div class="markdown-body" v-html="renderedSolution" /></div>
         </el-tab-pane>
-
         <el-tab-pane label="Python 代码" name="code">
           <div class="tab-content">
-            <h4>生成的代码</h4>
             <div class="code-container">
-              <div class="code-lines">
-                <span v-for="(line, idx) in codeLines" :key="idx">{{ idx + 1 }}</span>
-              </div>
+              <div class="code-lines"><span v-for="(_, i) in codeLines" :key="i">{{ i + 1 }}</span></div>
               <pre class="code-pre"><code>{{ result.code || '—' }}</code></pre>
             </div>
-            <el-button size="small" type="primary" @click="copyCode" style="margin-top: 10px">
-              📋 复制代码
-            </el-button>
+            <el-button size="small" type="primary" @click="copyCode" style="margin-top:10px;">📋 复制代码</el-button>
           </div>
         </el-tab-pane>
-
         <el-tab-pane label="执行结果" name="execution">
           <div class="tab-content">
-            <h4>运行输出</h4>
             <div v-if="result.execution_report">
               <p><strong>退出码：</strong>{{ result.execution_report.exit_code ?? '—' }}</p>
-              <p><strong>标准输出：</strong></p>
               <pre class="output-pre">{{ result.execution_report.stdout || '（无输出）' }}</pre>
-              <div v-if="result.execution_report.stderr" style="color: red;">
+              <div v-if="result.execution_report.stderr" style="color:#EF9A9A;">
                 <strong>错误输出：</strong>
                 <pre class="output-pre error-pre">{{ result.execution_report.stderr }}</pre>
               </div>
             </div>
           </div>
         </el-tab-pane>
-
         <el-tab-pane label="自动测试" name="tests">
           <div class="tab-content">
             <el-table :data="testCases" empty-text="暂无测试用例">
               <el-table-column prop="category" label="类型" width="120" />
               <el-table-column label="来源" width="130">
                 <template #default="{ row }">
-                  <el-tag :type="row.trusted ? 'success' : 'warning'" size="small">
-                    {{ row.trusted ? '系统权威' : '模型建议' }}
-                  </el-tag>
+                  <el-tag :type="row.trusted ? 'success' : 'warning'" size="small">{{ row.trusted ? '系统权威' : '模型建议' }}</el-tag>
                 </template>
               </el-table-column>
               <el-table-column prop="input" label="输入" min-width="180" />
@@ -261,94 +155,50 @@
             </el-table>
           </div>
         </el-tab-pane>
-
         <el-tab-pane label="修复记录" name="repairs">
           <div class="tab-content">
             <el-empty v-if="repairLogs.length === 0" description="本次代码一次运行通过，未触发修复" />
             <el-timeline v-else>
-              <el-timeline-item
-                v-for="item in repairLogs"
-                :key="item.log_id"
-                :type="item.repair_success ? 'success' : 'danger'"
-                :timestamp="`第 ${item.repair_round} 轮 · ${item.duration_ms || 0} ms`"
-              >
+              <el-timeline-item v-for="item in repairLogs" :key="item.log_id" :type="item.repair_success ? 'success' : 'danger'" :timestamp="`第 ${item.repair_round} 轮 · ${item.duration_ms || 0} ms`">
                 <p>{{ item.error_msg || '已执行修复' }}</p>
-                <el-tag :type="item.repair_success ? 'success' : 'danger'" size="small">
-                  {{ item.repair_success ? '修复成功' : '修复失败' }}
-                </el-tag>
+                <el-tag :type="item.repair_success ? 'success' : 'danger'" size="small">{{ item.repair_success ? '修复成功' : '修复失败' }}</el-tag>
               </el-timeline-item>
             </el-timeline>
           </div>
         </el-tab-pane>
-
         <el-tab-pane label="Agent Timeline" name="timeline">
-          <div class="tab-content">
-            <AgentTimeline :steps="agentSteps" />
-          </div>
+          <div class="tab-content"><AgentTimeline :steps="agentSteps" /></div>
         </el-tab-pane>
-
         <el-tab-pane v-if="stage2Enabled" label="Trace 详情" name="trace">
-          <div class="tab-content">
-            <TraceDetail :trace-id="result.trace_id" :trace-data="traceData" />
-          </div>
+          <div class="tab-content"><TraceDetail :trace-id="result.trace_id" :trace-data="traceData" /></div>
         </el-tab-pane>
-
         <el-tab-pane label="项目文档" name="document">
-          <div class="tab-content">
-            <h4>完整报告</h4>
-            <div class="document-content">
-              <div class="markdown-body" v-html="renderedDocument"></div>
-            </div>
-          </div>
+          <div class="tab-content"><div class="markdown-body" v-html="renderedDocument" /></div>
         </el-tab-pane>
-
         <el-tab-pane label="下载" name="download">
           <div class="tab-content">
-            <h4>下载选项</h4>
             <div class="download-buttons">
-              <el-button type="success" @click="downloadReport('md')" size="large">
-                📥 下载 Markdown 报告
-              </el-button>
-              <el-button type="primary" @click="downloadReport('json')" size="large">
-                📥 下载 JSON 结果
-              </el-button>
-              <el-button type="warning" @click="downloadCode" size="large">
-                📥 下载 Python 代码
-              </el-button>
+              <el-button type="success" plain @click="downloadReport('md')">📥 Markdown</el-button>
+              <el-button type="primary" plain @click="downloadReport('json')">📥 JSON</el-button>
+              <el-button type="warning" plain @click="downloadCode">📥 Python</el-button>
             </div>
           </div>
         </el-tab-pane>
       </el-tabs>
 
-      <!-- 注意区域 -->
       <div v-if="result.notes || result.attention" class="notes-area">
-        <el-alert
-          title="注意"
-          :description="result.notes || result.attention"
-          type="warning"
-          show-icon
-          :closable="false"
-        />
+        <el-alert title="注意" :description="result.notes || result.attention" type="warning" show-icon :closable="false" />
       </div>
 
-      <!-- 底部操作按钮 -->
       <div class="action-buttons">
-        <el-button type="warning" @click="handleRerun" :loading="rerunLoading">
-          🔄 重新执行
-        </el-button>
+        <el-button type="warning" plain @click="handleRerun" :loading="rerunLoading">🔄 重新执行</el-button>
       </div>
-    </el-card>
+    </div>
 
-    <el-alert
-      v-if="taskError && !loading"
-      title="任务执行失败"
-      :description="taskError"
-      type="error"
-      show-icon
-      :closable="false"
-      class="task-error"
-    />
-    <el-empty v-if="!result && !loading && !taskError" description="提交题目后，结果将在这里显示" />
+    <div v-if="!result && !loading && !taskError" class="empty-state">
+      <span class="empty-icon">🧠</span>
+      <p>提交题目后，结果将在这里显示</p>
+    </div>
   </div>
 </template>
 
@@ -373,10 +223,7 @@ import {
 import AgentTimeline from '../components/AgentTimeline.vue'
 import TraceDetail from '../components/TraceDetail.vue'
 
-marked.setOptions({
-  breaks: true,
-  gfm: true
-})
+marked.setOptions({ breaks: true, gfm: true })
 
 const problemText = ref('')
 const supplementText = ref('')
@@ -403,28 +250,25 @@ const traceData = ref({})
 const stage2Enabled = import.meta.env.VITE_ENABLE_STAGE2 === 'true'
 let progressTimer = null
 
-const renderedProblem = computed(() => {
-  if (!result.value) return ''
-  return marked(result.value.problem || '—')
+const deployItems = computed(() => {
+  const items = [
+    { label: '总耗时', value: result.value?.total_ms || 0, unit: 'ms' },
+    { label: 'API 调用', value: result.value?.api_call ? '是' : '否', unit: '' },
+    { label: '兜底输出', value: result.value?.fallback_used ? '是' : '否', unit: '' },
+    { label: '代码长度', value: result.value?.code_length || 0, unit: '字符' },
+  ]
+  if (stage2Enabled) {
+    items.push({ label: '使用模型', value: result.value?.model_name || '—', unit: '' })
+    items.push({ label: 'Prompt 版本', value: result.value?.prompt_version || '—', unit: '' })
+  }
+  return items
 })
 
-const renderedSolution = computed(() => {
-  if (!result.value) return ''
-  return marked(result.value.solution_markdown || '—')
-})
+const renderedProblem = computed(() => result.value ? marked(result.value.problem || '—') : '')
+const renderedSolution = computed(() => result.value ? marked(result.value.solution_markdown || '—') : '')
+const renderedDocument = computed(() => result.value ? marked(result.value.project_document || '暂无项目文档。') : '')
+const codeLines = computed(() => result.value?.code ? result.value.code.split('\n') : [])
 
-const renderedDocument = computed(() => {
-  if (!result.value) return ''
-  return marked(result.value.project_document || '暂无项目文档。')
-})
-
-const codeLines = computed(() => {
-  if (!result.value || !result.value.code) return []
-  const lines = result.value.code.split('\n')
-  return lines.map((_, i) => i + 1)
-})
-
-// 加载 Prompt 版本列表
 const loadPromptVersions = async () => {
   if (!stage2Enabled) return
   try {
@@ -432,43 +276,26 @@ const loadPromptVersions = async () => {
     if (response.data.code === 0) {
       promptVersions.value = response.data.data || []
       const active = promptVersions.value.find(v => v.is_active)
-      if (active) {
-        selectedPromptVersion.value = active.version
-      }
+      if (active) selectedPromptVersion.value = active.version
     }
-  } catch (error) {
-    if (error.response && error.response.status === 404) {
-      promptVersions.value = [{ version: 'v1.0', is_active: true }]
-      selectedPromptVersion.value = 'v1.0'
-    }
+  } catch {
+    promptVersions.value = [{ version: 'v1.0', is_active: true }]
+    selectedPromptVersion.value = 'v1.0'
   }
 }
 
 const applyPromptVersion = async () => {
-  if (!selectedPromptVersion.value) {
-    ElMessage.warning('请选择版本')
-    return
-  }
+  if (!selectedPromptVersion.value) { ElMessage.warning('请选择版本'); return }
   try {
     await updatePromptVersion('all', selectedPromptVersion.value)
     ElMessage.success(`已切换到 Prompt 版本 ${selectedPromptVersion.value}`)
-  } catch (error) {
-    ElMessage.error('切换版本失败')
-  }
+  } catch { ElMessage.error('切换版本失败') }
 }
 
 const handleFileChange = (file) => {
   const allowedTypes = ['image/png', 'image/jpeg', 'image/webp']
-  if (!allowedTypes.includes(file.raw?.type)) {
-    ElMessage.error('仅支持 PNG、JPEG、WebP 图片')
-    clearFile()
-    return
-  }
-  if (file.raw.size > 10 * 1024 * 1024) {
-    ElMessage.error('图片大小不能超过 10MB')
-    clearFile()
-    return
-  }
+  if (!allowedTypes.includes(file.raw?.type)) { ElMessage.error('仅支持 PNG、JPEG、WebP 图片'); clearFile(); return }
+  if (file.raw.size > 10 * 1024 * 1024) { ElMessage.error('图片大小不能超过 10MB'); clearFile(); return }
   uploadFile.value = file.raw
   uploadFileName.value = file.name
 }
@@ -494,13 +321,9 @@ const startProgress = () => {
   progress.value = 0
   progressStatus.value = ''
   const hints = ['正在识别题目...', '正在规划解题思路...', '正在生成代码...', '正在生成测试用例...', '正在执行和调试...', '正在生成报告...']
-  
   if (progressTimer) clearInterval(progressTimer)
   progressTimer = setInterval(() => {
-    if (progress.value >= 95) {
-      clearInterval(progressTimer)
-      return
-    }
+    if (progress.value >= 95) { clearInterval(progressTimer); return }
     progress.value += Math.random() * 8 + 2
     if (progress.value > 95) progress.value = 95
     const hintIndex = Math.min(Math.floor(progress.value / 20), hints.length - 1)
@@ -509,10 +332,7 @@ const startProgress = () => {
 }
 
 const stopProgress = () => {
-  if (progressTimer) {
-    clearInterval(progressTimer)
-    progressTimer = null
-  }
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null }
   progress.value = 100
   progressStatus.value = 'success'
   progressHint.value = '✅ 完成！'
@@ -521,53 +341,27 @@ const stopProgress = () => {
 const fetchAgentSteps = async (id) => {
   try {
     const response = await getTaskSteps(id)
-    if (response.data.code === 0) {
-      agentSteps.value = response.data.data || []
-    } else {
-      agentSteps.value = []
-    }
-  } catch (error) {
-    if (error.response && error.response.status === 404) {
-      agentSteps.value = []
-    } else {
-      console.error('获取 Agent 步骤失败:', error)
-    }
-  }
+    agentSteps.value = response.data.code === 0 ? response.data.data || [] : []
+  } catch { agentSteps.value = [] }
 }
 
 const fetchTaskArtifacts = async (id) => {
-  const [testsResponse, repairsResponse] = await Promise.all([
-    getTaskTests(id),
-    getTaskRepairs(id),
-  ])
+  const [testsResponse, repairsResponse] = await Promise.all([getTaskTests(id), getTaskRepairs(id)])
   testCases.value = testsResponse.data.code === 0 ? testsResponse.data.data || [] : []
   repairLogs.value = repairsResponse.data.code === 0 ? repairsResponse.data.data || [] : []
 }
 
 const fetchTraceData = async (id) => {
+  if (!stage2Enabled) return
   try {
     const response = await getTaskTrace(id)
-    if (response.data.code === 0) {
-      traceData.value = response.data.data || {}
-    } else {
-      traceData.value = {}
-    }
-  } catch (error) {
-    if (error.response && error.response.status === 404) {
-      traceData.value = {}
-    } else {
-      console.error('获取 Trace 数据失败:', error)
-    }
-  }
+    traceData.value = response.data.code === 0 ? response.data.data || {} : {}
+  } catch { traceData.value = {} }
 }
 
 const submitTask = async () => {
-  if (!problemText.value.trim() && !uploadFile.value) {
-    ElMessage.warning('请输入题目描述或上传截图')
-    return
-  }
+  if (!problemText.value.trim() && !uploadFile.value) { ElMessage.warning('请输入题目描述或上传截图'); return }
 
-  // 立即显示进度
   loading.value = true
   result.value = null
   taskError.value = ''
@@ -580,14 +374,9 @@ const submitTask = async () => {
 
   try {
     let response
-    
     if (uploadFile.value) {
       try {
-        response = await uploadImageWithFallback(
-          uploadFile.value,
-          supplementText.value,
-          apiKey.value,
-        )
+        response = await uploadImageWithFallback(uploadFile.value, supplementText.value, apiKey.value)
       } catch (imgError) {
         if (imgError.isImageUpload404) {
           stopProgress()
@@ -605,7 +394,6 @@ const submitTask = async () => {
     if (response.data.code === 0) {
       const data = response.data.data
       taskId.value = data.task_id
-      
       const finalResult = await pollTaskStatus(taskId.value)
       finalResult.code_length = finalResult.code ? finalResult.code.length : 0
       finalResult.api_call = Boolean(finalResult.api_call)
@@ -613,14 +401,10 @@ const submitTask = async () => {
       finalResult.notes = finalResult.notes || '请确保输入符合题目要求，代码在 Python 3.10+ 环境中运行。'
       finalResult.model_name = finalResult.model_name || finalResult.metrics?.text_model || '—'
       finalResult.prompt_version = finalResult.prompt_version || selectedPromptVersion.value || '—'
-      
       result.value = finalResult
       currentModel.value = finalResult.model_name
-      
-      const followUpRequests = [
-        fetchAgentSteps(taskId.value),
-        fetchTaskArtifacts(taskId.value),
-      ]
+
+      const followUpRequests = [fetchAgentSteps(taskId.value), fetchTaskArtifacts(taskId.value)]
       if (stage2Enabled) followUpRequests.push(fetchTraceData(taskId.value))
       await Promise.all(followUpRequests)
 
@@ -632,7 +416,6 @@ const submitTask = async () => {
         ElMessage.error(taskError.value)
         return
       }
-      
       stopProgress()
       ElMessage.success('生成成功！')
     } else {
@@ -649,65 +432,38 @@ const submitTask = async () => {
     }
   } finally {
     loading.value = false
-    setTimeout(() => {
-      progress.value = 0
-    }, 2000)
+    setTimeout(() => { progress.value = 0 }, 2000)
   }
 }
 
 const downloadReport = async (format = 'md') => {
-  if (!taskId.value) {
-    ElMessage.warning('没有可下载的报告')
-    return
-  }
+  if (!taskId.value) { ElMessage.warning('没有可下载的报告'); return }
   try {
     const response = await getTaskReport(taskId.value)
-    let blob, filename
-    if (format === 'json') {
-      blob = new Blob([JSON.stringify(result.value, null, 2)], { type: 'application/json' })
-      filename = `report_${taskId.value}.json`
-    } else {
-      blob = new Blob([response.data], { type: 'text/markdown' })
-      filename = `report_${taskId.value}.md`
-    }
-    const url = URL.createObjectURL(blob)
+    const blob = new Blob([response.data], { type: format === 'json' ? 'application/json' : 'text/markdown' })
     const a = document.createElement('a')
-    a.href = url
-    a.download = filename
+    a.href = URL.createObjectURL(blob)
+    a.download = `report_${taskId.value}.${format === 'json' ? 'json' : 'md'}`
     a.click()
-    URL.revokeObjectURL(url)
+    URL.revokeObjectURL(a.href)
     ElMessage.success('下载成功')
-  } catch (error) {
-    console.error('下载失败:', error)
-    ElMessage.error(handleApiError(error, '下载失败'))
-  }
+  } catch { ElMessage.error('下载失败') }
 }
 
 const downloadCode = () => {
-  if (!result.value || !result.value.code) {
-    ElMessage.warning('没有代码可下载')
-    return
-  }
+  if (!result.value?.code) { ElMessage.warning('没有代码可下载'); return }
   const blob = new Blob([result.value.code], { type: 'text/plain' })
-  const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  a.href = url
+  a.href = URL.createObjectURL(blob)
   a.download = `solution_${taskId.value}.py`
   a.click()
-  URL.revokeObjectURL(url)
+  URL.revokeObjectURL(a.href)
   ElMessage.success('代码下载成功')
 }
 
 const copyCode = () => {
-  if (!result.value || !result.value.code) {
-    ElMessage.warning('没有代码可复制')
-    return
-  }
-  navigator.clipboard.writeText(result.value.code).then(() => {
-    ElMessage.success('代码已复制到剪贴板')
-  }).catch(() => {
-    ElMessage.error('复制失败')
-  })
+  if (!result.value?.code) { ElMessage.warning('没有代码可复制'); return }
+  navigator.clipboard.writeText(result.value.code).then(() => ElMessage.success('已复制')).catch(() => ElMessage.error('复制失败'))
 }
 
 const handleRerun = async () => {
@@ -723,10 +479,7 @@ const handleRerun = async () => {
       finalResult.code_length = finalResult.code ? finalResult.code.length : 0
       result.value = finalResult
       currentModel.value = finalResult.model_name || finalResult.metrics?.text_model || '—'
-      const followUpRequests = [
-        fetchAgentSteps(taskId.value),
-        fetchTaskArtifacts(taskId.value),
-      ]
+      const followUpRequests = [fetchAgentSteps(taskId.value), fetchTaskArtifacts(taskId.value)]
       if (stage2Enabled) followUpRequests.push(fetchTraceData(taskId.value))
       await Promise.all(followUpRequests)
       if (finalResult.status === 'failed') {
@@ -742,171 +495,228 @@ const handleRerun = async () => {
 }
 
 loadPromptVersions()
-
-onUnmounted(() => {
-  if (progressTimer) {
-    clearInterval(progressTimer)
-  }
-})
+onUnmounted(() => { if (progressTimer) clearInterval(progressTimer) })
 </script>
 
 <style scoped>
-.home-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-.task-error { margin-bottom: 20px; }
+.home-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+  min-height: 100vh;
+  background-image: url('/微信图片_20260630155027_91_3.jpg') !important;
+  background-size: cover !important;
+  background-position: center !important;
+  background-attachment: fixed !important;
+  background-repeat: no-repeat !important;
+  position: relative;
+  border-radius: 0;
+}
+
+.home-container::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(10, 10, 26, 0.55);
+  z-index: -1;
+}
+
+.hero { margin-bottom: 32px; position: relative; z-index: 1; }
+.hero-title { font-size: 40px; font-weight: 700; color: #fff; letter-spacing: -0.5px; margin-bottom: 6px; }
+.hero-sub { font-size: 16px; color: rgba(255,255,255,0.4); }
 
 .control-bar {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
   padding: 12px 16px;
-  background: #f5f7fa;
-  border-radius: 8px;
-  margin-bottom: 16px;
+  background: rgba(255,255,255,0.04);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  margin-bottom: 20px;
   flex-wrap: wrap;
+  position: relative;
+  z-index: 1;
+}
+.control-group { display: flex; align-items: center; gap: 8px; }
+.control-label { font-size: 13px; color: rgba(255,255,255,0.4); }
+
+.glass-card {
+  background: rgba(255,255,255,0.04);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 24px;
+  position: relative;
+  z-index: 1;
 }
 
-.control-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.input-area .problem-input :deep(.el-textarea__inner) {
+  background: rgba(255,255,255,0.04) !important;
+  border: 1px solid rgba(255,255,255,0.06) !important;
+  color: #fff !important;
+  font-size: 15px;
+  line-height: 1.7;
 }
 
-.control-label {
-  font-size: 13px;
-  color: #606266;
-}
-
-.input-card { margin-bottom: 20px; }
 .api-key-row {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) auto;
+  grid-template-columns: 1fr auto;
   align-items: center;
   gap: 12px;
   margin-bottom: 14px;
 }
-.upload-area { display: flex; align-items: center; gap: 10px; margin: 12px 0; flex-wrap: wrap; }
-.file-name { color: #409EFF; }
+.upload-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0;
+  flex-wrap: wrap;
+}
+.upload-area .el-upload {
+  display: inline-flex !important;
+  align-items: center !important;
+}
+.upload-area .el-upload .el-button {
+  visibility: visible !important;
+  opacity: 1 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  border: 1px solid rgba(79,110,247,0.4) !important;
+  color: #4F6EF7 !important;
+  background: rgba(79,110,247,0.08) !important;
+}
+.upload-area .el-upload .el-button:hover {
+  background: rgba(79,110,247,0.15) !important;
+  border-color: #4F6EF7 !important;
+}
+.file-name { color: #4F6EF7; font-weight: 500; }
 .supplement-input { margin: 12px 0; }
-.progress-card { margin-bottom: 20px; }
-.progress-hint { margin-top: 10px; color: #606266; font-size: 14px; }
+.supplement-input :deep(.el-input__wrapper) {
+  background: rgba(255,255,255,0.04) !important;
+  border: 1px solid rgba(255,255,255,0.06) !important;
+  color: #fff !important;
+}
+.btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.btn-outline {
+  background: rgba(255,255,255,0.04) !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  color: rgba(255,255,255,0.5) !important;
+}
+.btn-outline:hover {
+  background: rgba(255,255,255,0.08) !important;
+  border-color: rgba(255,255,255,0.15) !important;
+  color: #fff !important;
+}
 
-.result-card { margin-top: 20px; }
+.progress-section {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  padding: 20px 24px;
+  margin-bottom: 24px;
+  position: relative;
+  z-index: 1;
+}
+.progress-hint { margin-top: 8px; color: rgba(255,255,255,0.4); font-size: 14px; }
+
+.result-section {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 16px;
+  padding: 20px 24px;
+  position: relative;
+  z-index: 1;
+}
+.semantic-alert { margin-bottom: 16px; }
 
 .deployment-cards { margin-bottom: 20px; }
 .deploy-card {
-  background: #f5f7fa;
-  border-radius: 8px;
-  padding: 12px 16px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 10px;
+  padding: 14px 12px;
   text-align: center;
-  border: 1px solid #ebeef5;
+  border: 1px solid rgba(255,255,255,0.04);
 }
-.deploy-label {
-  font-size: 12px;
-  color: #909399;
-  margin-bottom: 4px;
-}
-.deploy-value {
-  font-size: 18px;
-  font-weight: 600;
-  color: #303133;
-}
-.deploy-unit {
-  font-size: 12px;
-  font-weight: 400;
-  color: #909399;
-}
+.deploy-label { font-size: 12px; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+.deploy-value { font-size: 18px; font-weight: 600; color: #fff; }
+.deploy-unit { font-size: 12px; font-weight: 400; color: rgba(255,255,255,0.3); }
 
-.result-tabs { margin-top: 10px; }
-.tab-content { padding: 10px 0; }
-.tab-content h4 { margin: 0 0 10px 0; color: #303133; }
+.result-tabs { margin-top: 4px; }
+.tab-content { padding: 8px 0; color: rgba(255,255,255,0.6); }
+.tab-content h4 { color: #fff; margin: 0 0 10px 0; }
 
-.markdown-body { line-height: 1.8; color: #303133; }
-.markdown-body :deep(h1) { font-size: 22px; margin: 16px 0 8px 0; }
-.markdown-body :deep(h2) { font-size: 18px; margin: 14px 0 6px 0; }
-.markdown-body :deep(h3) { font-size: 16px; margin: 12px 0 4px 0; }
-.markdown-body :deep(p) { margin: 8px 0; }
-.markdown-body :deep(ul), .markdown-body :deep(ol) { padding-left: 24px; }
-.markdown-body :deep(li) { margin: 4px 0; }
-.markdown-body :deep(code) {
-  background: #f5f7fa;
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-family: 'Courier New', monospace;
-  font-size: 13px;
-}
-.markdown-body :deep(pre) {
-  background: #f5f7fa;
-  padding: 12px;
-  border-radius: 6px;
-  overflow: auto;
-  font-family: 'Courier New', monospace;
-  font-size: 13px;
-}
-.markdown-body :deep(strong) { font-weight: 700; color: #303133; }
-.contract-panel { margin-top: 18px; }
-.contract-rules { margin: 0; padding-left: 20px; }
-.contract-rules li { margin: 4px 0; }
-.semantic-alert { margin-bottom: 16px; }
+.markdown-body { line-height: 1.8; color: rgba(255,255,255,0.6); }
+.markdown-body :deep(h1), .markdown-body :deep(h2), .markdown-body :deep(h3) { color: #fff; }
+.markdown-body :deep(code) { background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 4px; color: #4F6EF7; }
+.markdown-body :deep(pre) { background: rgba(0,0,0,0.3); padding: 16px; border-radius: 8px; overflow: auto; }
+.markdown-body :deep(strong) { color: #fff; }
 
 .code-container {
   display: flex;
-  background: #1e1e2e;
-  border-radius: 6px;
+  background: rgba(0,0,0,0.4);
+  border-radius: 10px;
   overflow: auto;
   max-height: 400px;
 }
 .code-lines {
-  background: #1e1e2e;
-  color: #6c7086;
-  padding: 12px 8px;
+  background: rgba(0,0,0,0.2);
+  color: rgba(255,255,255,0.2);
+  padding: 14px 10px;
   text-align: right;
-  font-family: 'Courier New', monospace;
+  font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 13px;
-  line-height: 1.6;
-  min-width: 40px;
+  line-height: 1.7;
+  min-width: 44px;
   user-select: none;
-  border-right: 1px solid #313244;
+  border-right: 1px solid rgba(255,255,255,0.04);
 }
 .code-lines span { display: block; }
 .code-pre {
   flex: 1;
-  background: #1e1e2e;
-  color: #cdd6f4;
-  padding: 12px 16px;
+  color: rgba(255,255,255,0.8);
+  padding: 14px 18px;
   margin: 0;
-  font-family: 'Courier New', monospace;
+  font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.7;
   overflow: auto;
 }
-.code-pre code { font-family: 'Courier New', monospace; }
 
 .output-pre {
-  background: #1e1e2e;
-  color: #cdd6f4;
-  padding: 16px;
-  border-radius: 6px;
+  background: rgba(0,0,0,0.2);
+  padding: 14px 18px;
+  border-radius: 8px;
   overflow: auto;
   max-height: 300px;
-  font-family: 'Courier New', monospace;
+  font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.7;
+  color: rgba(255,255,255,0.7);
 }
-.error-pre { background: #1e1e2e; color: #f38ba8; }
+.error-pre { color: #EF9A9A !important; background: rgba(239,154,154,0.08) !important; }
 
-.document-content pre {
-  background: #f5f7fa;
-  padding: 16px;
-  border-radius: 6px;
-  max-height: 400px;
-  overflow: auto;
-  font-size: 13px;
-}
-.download-buttons { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; }
+.download-buttons { display: flex; gap: 12px; flex-wrap: wrap; }
+.download-buttons .el-button { background: rgba(255,255,255,0.04) !important; border: 1px solid rgba(255,255,255,0.06) !important; color: rgba(255,255,255,0.5) !important; }
+.download-buttons .el-button:hover { background: rgba(255,255,255,0.08) !important; color: #fff !important; }
+
 .notes-area { margin-top: 16px; }
 .action-buttons { display: flex; gap: 12px; margin-top: 20px; flex-wrap: wrap; justify-content: center; }
+.action-buttons .el-button { background: rgba(255,255,255,0.04) !important; border: 1px solid rgba(255,255,255,0.06) !important; color: rgba(255,255,255,0.4) !important; }
+.action-buttons .el-button:hover { background: rgba(255,255,255,0.08) !important; color: #fff !important; }
+
+.empty-state { text-align: center; padding: 60px 0; position: relative; z-index: 1; }
+.empty-icon { font-size: 48px; opacity: 0.2; margin-bottom: 12px; }
+.empty-state p { color: rgba(255,255,255,0.2); font-size: 15px; }
 
 @media (max-width: 720px) {
+  .hero-title { font-size: 28px; }
   .api-key-row { grid-template-columns: 1fr; }
 }
 </style>

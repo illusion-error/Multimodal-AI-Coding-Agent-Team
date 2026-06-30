@@ -1,57 +1,40 @@
-<!-- src/views/MetricsView.vue -->
 <template>
   <div class="metrics-container">
-    <h1>📊 指标看板</h1>
+    <div class="hero">
+      <h1 class="hero-title">📊 指标看板</h1>
+      <p class="hero-sub">系统运行状态与性能统计</p>
+    </div>
 
-    <!-- 概览卡片 -->
-    <el-row :gutter="20" class="metrics-cards">
-      <el-col :span="6" v-for="item in overviewMetrics" :key="item.label">
-        <el-card shadow="hover">
-          <div class="metric-item">
-            <div class="metric-value">{{ item.value }}</div>
-            <div class="metric-label">{{ item.label }}</div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
+    <div class="stats-grid">
+      <div class="stat-card" v-for="item in overviewMetrics" :key="item.label">
+        <span class="stat-label">{{ item.label }}</span>
+        <span class="stat-value">{{ item.value }}</span>
+      </div>
+    </div>
 
-    <!-- Benchmark 图表（第二阶段功能） -->
-    <el-card v-if="enableStage2" class="benchmark-card">
-      <BenchmarkCharts :data="benchmarkData" :loading="benchmarkLoading" @refresh="fetchBenchmarkData" />
-    </el-card>
+    <div class="metrics-grid">
+      <div class="glass-card">
+        <h3>📈 任务统计</h3>
+        <div class="stat-list">
+          <div class="stat-row"><span>总任务数</span><span>{{ metrics.total_tasks || 0 }}</span></div>
+          <div class="stat-row"><span>成功任务</span><span>{{ metrics.success_tasks || 0 }}</span></div>
+          <div class="stat-row"><span>失败任务</span><span>{{ metrics.failed_tasks || 0 }}</span></div>
+          <div class="stat-row highlight"><span>成功率</span><span>{{ successRate }}%</span></div>
+        </div>
+      </div>
 
-    <!-- 详细指标 -->
-    <el-row :gutter="20" style="margin-top: 20px;">
-      <el-col :span="12">
-        <el-card>
-          <h3>📈 任务统计</h3>
-          <div class="chart-placeholder">
-            <p>总任务数：{{ metrics.total_tasks || 0 }}</p>
-            <p>成功任务：{{ metrics.success_tasks || 0 }}</p>
-            <p>失败任务：{{ metrics.failed_tasks || 0 }}</p>
-            <p>成功率：{{ successRate }}%</p>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="12">
-        <el-card>
-          <h3>⚡ 性能指标</h3>
-          <div class="chart-placeholder">
-            <p>平均响应时间：{{ metrics.avg_response_time || 0 }}ms</p>
-            <p>代码可运行率：{{ codeRunRate }}%</p>
-            <p>测试通过率：{{ testPassRate }}%</p>
-            <p>修复成功率：{{ repairRate }}%</p>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
+      <div class="glass-card">
+        <h3>⚡ 性能指标</h3>
+        <div class="stat-list">
+          <div class="stat-row"><span>平均响应时间</span><span>{{ metrics.avg_response_time || 0 }}ms</span></div>
+          <div class="stat-row"><span>代码可运行率</span><span>{{ metrics.code_run_rate || 0 }}%</span></div>
+          <div class="stat-row"><span>测试通过率</span><span>{{ metrics.test_pass_rate || 0 }}%</span></div>
+          <div class="stat-row highlight"><span>修复成功率</span><span>{{ metrics.repair_rate || 0 }}%</span></div>
+        </div>
+      </div>
+    </div>
 
-    <el-button 
-      type="primary" 
-      @click="refreshAll" 
-      :loading="loading"
-      style="margin-top: 20px"
-    >
+    <el-button type="primary" @click="refreshAll" :loading="loading" class="refresh-btn">
       刷新数据
     </el-button>
   </div>
@@ -60,16 +43,10 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getMetricsSummary, getBenchmarkData, handleApiError } from '../api/task'
-import BenchmarkCharts from '../components/BenchmarkCharts.vue'
-
-// 功能开关：是否启用第二阶段功能
-const enableStage2 = import.meta.env.VITE_ENABLE_STAGE2 === 'true'
+import { getMetricsSummary, handleApiError } from '../api/task'
 
 const loading = ref(false)
-const benchmarkLoading = ref(false)
 const metrics = ref({})
-const benchmarkData = ref({})
 
 const overviewMetrics = computed(() => [
   { label: '总任务数', value: metrics.value.total_tasks || 0 },
@@ -84,78 +61,97 @@ const successRate = computed(() => {
   return total ? ((success / total) * 100).toFixed(1) : 0
 })
 
-const codeRunRate = computed(() => metrics.value.code_run_rate || 0)
-const testPassRate = computed(() => metrics.value.test_pass_rate || 0)
-const repairRate = computed(() => metrics.value.repair_rate || 0)
-
 const fetchMetrics = async () => {
   loading.value = true
   try {
     const response = await getMetricsSummary()
-    if (response.data.code === 0) {
-      metrics.value = response.data.data || {}
-    }
+    if (response.data.code === 0) metrics.value = response.data.data || {}
   } catch (error) {
-    console.error('加载指标失败:', error)
     ElMessage.error(handleApiError(error, '加载指标失败'))
   } finally {
     loading.value = false
   }
 }
 
-const fetchBenchmarkData = async () => {
-  if (!enableStage2) return
-  benchmarkLoading.value = true
-  try {
-    const response = await getBenchmarkData()
-    if (response.data.code === 0) {
-      benchmarkData.value = response.data.data || {}
-    } else {
-      benchmarkData.value = {}
-    }
-  } catch (error) {
-    if (error.response && error.response.status === 404) {
-      benchmarkData.value = {}
-    } else {
-      console.error('加载 Benchmark 数据失败:', error)
-      ElMessage.error(handleApiError(error, '加载 Benchmark 数据失败'))
-    }
-  } finally {
-    benchmarkLoading.value = false
-  }
-}
-
-const refreshAll = () => {
-  fetchMetrics()
-  if (enableStage2) {
-    fetchBenchmarkData()
-  }
-  ElMessage.success('已刷新')
-}
-
-onMounted(() => {
-  fetchMetrics()
-  if (enableStage2) {
-    fetchBenchmarkData()
-  }
-})
+const refreshAll = () => { fetchMetrics(); ElMessage.success('已刷新') }
+onMounted(fetchMetrics)
 </script>
 
 <style scoped>
-.metrics-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-.metrics-cards { margin-bottom: 20px; }
-.metric-item { text-align: center; }
-.metric-value { 
-  font-size: 28px; 
-  font-weight: 700; 
-  color: #409EFF;
+.metrics-container {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 20px;
+  min-height: 100vh;
+  background-image: url('/微信图片_20260630155028_93_3.jpg') !important;
+  background-size: cover !important;
+  background-position: center !important;
+  background-attachment: fixed !important;
+  background-repeat: no-repeat !important;
+  position: relative;
+  border-radius: 0;
 }
-.metric-label { 
-  font-size: 14px; 
-  color: #909399; 
-  margin-top: 8px;
+
+.metrics-container::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(10, 10, 26, 0.55);
+  z-index: -1;
 }
-.chart-placeholder { padding: 10px 0; }
-.chart-placeholder p { margin: 8px 0; font-size: 15px; }
-.benchmark-card { margin-top: 20px; }
+
+.hero { margin-bottom: 28px; position: relative; z-index: 1; }
+.hero-title { font-size: 32px; font-weight: 700; color: #fff; letter-spacing: -0.5px; margin-bottom: 4px; }
+.hero-sub { font-size: 15px; color: rgba(255,255,255,0.4); }
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+  position: relative;
+  z-index: 1;
+}
+.stat-card {
+  background: rgba(255,255,255,0.04);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  padding: 18px 16px;
+  text-align: center;
+}
+.stat-label { display: block; font-size: 12px; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+.stat-value { font-size: 28px; font-weight: 700; color: #fff; }
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+  position: relative;
+  z-index: 1;
+}
+.glass-card {
+  background: rgba(255,255,255,0.04);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 16px;
+  padding: 24px;
+}
+.glass-card h3 { margin: 0 0 16px 0; font-size: 16px; font-weight: 600; color: #fff; }
+
+.stat-list { display: flex; flex-direction: column; gap: 6px; }
+.stat-row {
+  display: flex; justify-content: space-between;
+  color: rgba(255,255,255,0.5); font-size: 14px;
+  padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.stat-row span:last-child { color: rgba(255,255,255,0.8); font-weight: 500; }
+.stat-row.highlight { color: #fff; font-weight: 600; }
+.stat-row.highlight span:last-child { color: #4F6EF7; }
+
+.refresh-btn { display: block; margin: 0 auto; position: relative; z-index: 1; }
 </style>
