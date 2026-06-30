@@ -33,24 +33,30 @@ def test_get_task_trace_not_found():
     response = client.get("/api/tasks/non-existent-id/trace")
     assert response.status_code == 404
 
-def test_start_benchmark():
+def test_start_benchmark(monkeypatch):
     """测试启动跑批"""
     from backend.database import get_conn
     from backend.main import PROJECT_ROOT
-    import json
+    from sandbox.benchmark_runner import benchmark_planned_total
+
+    monkeypatch.setattr(
+        "sandbox.benchmark_runner.run_benchmark",
+        lambda **kwargs: {
+            "run_id": kwargs.get("run_id"),
+            "status": "running",
+            "total": benchmark_planned_total(PROJECT_ROOT / "benchmark_data.json"),
+            "passed": 0,
+        },
+    )
     
     # 先清理数据
     with get_conn() as conn:
         conn.execute("DELETE FROM benchmark_results")
         conn.execute("DELETE FROM benchmark_runs")
     
-    # 读取题库真实数量
+    # 读取题库真实计划数量：题库数 × Benchmark 模式数
     benchmark_file = PROJECT_ROOT / "benchmark_data.json"
-    total_questions = 0
-    if benchmark_file.exists():
-        with open(benchmark_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            total_questions = len(data) if isinstance(data, list) else 0
+    total_questions = benchmark_planned_total(benchmark_file)
     
     response = client.post("/api/benchmark/runs")
     assert response.status_code == 200
@@ -132,9 +138,21 @@ def test_get_benchmark_status():
     assert data["data"]["passed"] == 8
     assert data["data"]["failed"] == 2
 
-def test_benchmark_immediate_query():
+def test_benchmark_immediate_query(monkeypatch):
     """测试 POST /api/benchmark/runs 后立即查询返回 running（不等待）"""
     from backend.database import get_conn
+    from backend.main import PROJECT_ROOT
+    from sandbox.benchmark_runner import benchmark_planned_total
+
+    monkeypatch.setattr(
+        "sandbox.benchmark_runner.run_benchmark",
+        lambda **kwargs: {
+            "run_id": kwargs.get("run_id"),
+            "status": "running",
+            "total": benchmark_planned_total(PROJECT_ROOT / "benchmark_data.json"),
+            "passed": 0,
+        },
+    )
     
     # 先清理数据
     with get_conn() as conn:

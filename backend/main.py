@@ -1107,26 +1107,19 @@ async def get_task_trace(task_id: str) -> dict:
 @app.post("/api/benchmark/runs")
 async def start_benchmark_run(background_tasks: BackgroundTasks) -> dict:
     """启动跑批任务"""
-    from sandbox.benchmark_runner import run_benchmark
+    from sandbox.benchmark_runner import benchmark_planned_total, run_benchmark
     from backend.database import get_conn
     import threading
     from datetime import datetime
-    import json
     
     run_id = str(uuid.uuid4())
     now = datetime.now().isoformat(timespec="milliseconds")
     
-    # ===== 新增：读取题库真实数量 =====
+    # 读取真实计划数：题库数量 × Benchmark 模式数量。这个 total 必须
+    # 和 benchmark_runner 写入同一个 run_id 的结果数一致，否则前端
+    # 轮询进度会停留在 running 或出现百分比不准确。
     benchmark_file = PROJECT_ROOT / "benchmark_data.json"
-    total_questions = 0
-    if benchmark_file.exists():
-        try:
-            with open(benchmark_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                total_questions = len(data) if isinstance(data, list) else 0
-        except Exception:
-            total_questions = 0
-    # ===== 新增结束 =====
+    total_questions = benchmark_planned_total(benchmark_file)
     
     # ===== 修改：插入 running 记录，total 使用真实值 =====
     with get_conn() as conn:
