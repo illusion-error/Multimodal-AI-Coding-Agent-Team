@@ -212,7 +212,6 @@ const handleRerun = async () => {
     if (response.data.code === 0) {
       const newTaskId = response.data.data.task_id
       ElMessage.success(`已重新执行，新任务ID: ${newTaskId}`)
-      // 跳转到新任务详情
       router.push(`/task/${newTaskId}`)
     }
   } catch (error) {
@@ -225,23 +224,38 @@ const handleRerun = async () => {
 const loadData = async () => {
   loading.value = true
   try {
-    const [detailRes, stepsRes, traceRes] = await Promise.all([
-      getTaskDetail(taskId),
-      getTaskSteps(taskId),
-      getTaskTrace(taskId)
-    ])
-
+    // 先获取任务详情
+    const detailRes = await getTaskDetail(taskId)
     if (detailRes.data.code === 0) {
       task.value = detailRes.data.data
+    } else {
+      ElMessage.error('加载任务详情失败')
+      loading.value = false
+      return
     }
 
-    if (stepsRes.data.code === 0) {
-      agentSteps.value = stepsRes.data.data || []
+    // 获取 Agent 步骤
+    try {
+      const stepsRes = await getTaskSteps(taskId)
+      if (stepsRes.data.code === 0) {
+        agentSteps.value = stepsRes.data.data || []
+      }
+    } catch (e) {
+      console.warn('获取 Agent 步骤失败:', e)
+      agentSteps.value = []
     }
 
-    if (traceRes.data.code === 0) {
-      traceData.value = traceRes.data.data || {}
+    // 获取 Trace（暂时禁用，避免 CORS）
+    try {
+      const traceRes = await getTaskTrace(taskId)
+      if (traceRes.data.code === 0) {
+        traceData.value = traceRes.data.data || {}
+      }
+    } catch (e) {
+      console.warn('获取 Trace 失败:', e)
+      traceData.value = {}
     }
+
   } catch (error) {
     console.error('加载任务详情失败:', error)
     ElMessage.error(handleApiError(error, '加载任务详情失败'))
@@ -255,6 +269,7 @@ onMounted(loadData)
 
 <style scoped>
 .task-detail-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+
 .detail-header {
   display: flex;
   align-items: center;
@@ -262,8 +277,15 @@ onMounted(loadData)
   margin-bottom: 20px;
   flex-wrap: wrap;
 }
-.detail-header h1 { margin: 0; }
-.detail-card { margin-top: 10px; }
+.detail-header h1 { margin: 0; color: #fff; }
+
+.detail-card {
+  margin-top: 10px;
+  background: rgba(255, 255, 255, 0.04) !important;
+  backdrop-filter: blur(16px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
 .info-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -273,20 +295,38 @@ onMounted(loadData)
   display: flex;
   flex-direction: column;
 }
-.info-item .label { font-size: 12px; color: #909399; }
-.info-item .value { font-size: 14px; font-weight: 500; color: #303133; }
-.markdown-body { line-height: 1.8; color: #303133; }
-.markdown-body :deep(code) { background: #f5f7fa; padding: 2px 6px; border-radius: 3px; }
-.markdown-body :deep(pre) { background: #f5f7fa; padding: 12px; border-radius: 6px; overflow: auto; }
+.info-item .label { font-size: 12px; color: rgba(255, 255, 255, 0.4); }
+.info-item .value { font-size: 14px; font-weight: 500; color: #fff; }
+
+.markdown-body {
+  line-height: 1.8;
+  color: rgba(255, 255, 255, 0.7);
+}
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3) { color: #fff; }
+.markdown-body :deep(code) {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: #4F6EF7;
+}
+.markdown-body :deep(pre) {
+  background: rgba(0, 0, 0, 0.2);
+  padding: 12px;
+  border-radius: 6px;
+  overflow: auto;
+}
+
 .code-container {
   display: flex;
-  background: #1e1e2e;
+  background: #1a1a2e;
   border-radius: 6px;
   overflow: auto;
   max-height: 400px;
 }
 .code-lines {
-  background: #1e1e2e;
+  background: #1a1a2e;
   color: #6c7086;
   padding: 12px 8px;
   text-align: right;
@@ -300,7 +340,7 @@ onMounted(loadData)
 .code-lines span { display: block; }
 .code-pre {
   flex: 1;
-  background: #1e1e2e;
+  background: #1a1a2e;
   color: #cdd6f4;
   padding: 12px 16px;
   margin: 0;
@@ -310,8 +350,9 @@ onMounted(loadData)
   overflow: auto;
 }
 .code-pre code { font-family: 'Courier New', monospace; }
+
 .output-pre {
-  background: #1e1e2e;
+  background: #1a1a2e;
   color: #cdd6f4;
   padding: 16px;
   border-radius: 6px;
@@ -321,6 +362,13 @@ onMounted(loadData)
   font-size: 13px;
   line-height: 1.6;
 }
-.error-pre { background: #1e1e2e; color: #f38ba8; }
-.action-buttons { display: flex; gap: 12px; margin-top: 20px; flex-wrap: wrap; }
+.error-pre { background: #1a1a2e; color: #f38ba8; }
+
+.action-buttons {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
 </style>

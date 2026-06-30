@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import sys  
-from pathlib import Path  
+import sys
+from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import io
 import json
@@ -108,10 +108,12 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="AI Coding Agent API", version=APP_VERSION, lifespan=lifespan)
+
+# ===== 强制 CORS（修复跨域） =====
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_allowed_origins(),
-    allow_credentials=False,
+    allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1229,4 +1231,3 @@ if __name__ == "__main__":
         host=os.getenv("SERVER_HOST", "0.0.0.0"),
         port=int(os.getenv("SERVER_PORT", "8000")),
     )
-
