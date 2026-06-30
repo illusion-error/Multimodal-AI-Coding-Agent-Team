@@ -32,7 +32,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://127.0.0.1:8000}
-        VITE_ENABLE_STAGE2: ${VITE_ENABLE_STAGE2:-false}
+        VITE_ENABLE_STAGE2: ${VITE_ENABLE_STAGE2:-true}
     ports:
       - "5173:80"
     depends_on:

@@ -243,6 +243,7 @@ def generate_comparison_md(summaries, base_path):
     path = docs_dir / "benchmark_comparison.md"
     with open(path, "w", encoding="utf-8") as f:
         f.write("# 🚀 Benchmark 全量维度对比报告\n\n")
+        f.write("> 说明：当前报告记录的是离线兜底 baseline，用于证明 Benchmark 跑批、用例执行和报告生成链路可运行；通过率不代表接入有效百炼 Key 与继续扩展算法模板后的最终效果。\n\n")
         f.write("| 模式 | 识别率 | 运行率 | **通过率** | 修复次数 | 平均耗时 |\n")
         f.write("| :--- | :--- | :--- | :--- | :--- | :--- |\n")
         for s in summaries:

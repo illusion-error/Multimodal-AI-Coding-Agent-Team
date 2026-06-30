@@ -91,7 +91,7 @@ http://127.0.0.1:8000/docs
 cd frontend
 npm ci
 $env:VITE_API_BASE_URL="http://127.0.0.1:8000"
-$env:VITE_ENABLE_STAGE2="false"
+$env:VITE_ENABLE_STAGE2="true"
 npm run dev
 ```
 
@@ -132,16 +132,21 @@ X-DashScope-API-Key: 你的百炼 API Key
 
 图片接口只接受真实 PNG、JPEG、WebP 文件，最大 10MB、最大 2500 万像素。
 
-第二阶段已提供 Benchmark 数据接口：
+工程化接口已启用，包含 Benchmark、Prompt 版本和 Trace：
 
 ```text
 GET /api/benchmark/results
+POST /api/benchmark/runs
+GET /api/benchmark/runs/{run_id}
+GET /api/prompt/versions
+POST /api/prompt/version
+GET /api/tasks/{task_id}/trace
 ```
 
-Prompt 版本和 Trace 后端尚未启用，因此第一阶段默认设置：
+前端默认展示 Prompt 版本、Trace 详情和 Benchmark 面板，本地运行时建议设置：
 
 ```text
-VITE_ENABLE_STAGE2=false
+VITE_ENABLE_STAGE2=true
 ```
 
 ## Benchmark
@@ -159,6 +164,7 @@ python -m sandbox.benchmark_runner --no-persist
 ```
 
 跑批会逐题调用 Agent、逐用例执行代码，并将摘要和明细写入统一 SQLite 数据库。
+当前 `docs/benchmark_comparison.md` 记录的是离线兜底 baseline，用于证明评测链路可运行；如果要在答辩中展示“模型效果提升”，需要使用有效百炼 Key 重新跑批或继续扩展算法模板覆盖率。
 
 ## 自动测试
 
@@ -172,8 +178,11 @@ pytest
 ```powershell
 cd frontend
 npm ci
+npm test -- --run
 npm run build
 ```
+
+`npm audit --omit=dev` 应为 0 个生产依赖漏洞。当前全量 `npm audit` 可能提示 Vite/esbuild 的开发服务器相关漏洞；它不进入生产 Nginx 静态镜像，但如需满足严格审计，可升级 Vite 主版本后重新构建验证。
 
 ## Docker Compose
 

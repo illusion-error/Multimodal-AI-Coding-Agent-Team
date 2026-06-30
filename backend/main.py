@@ -294,6 +294,7 @@ def validate_image(content: bytes, declared_mime: str) -> Dict[str, Any]:
         Image.DecompressionBombError,
         UnidentifiedImageError,
         OSError,
+        SyntaxError,
         ValueError,
     ) as exc:
         raise HTTPException(status_code=400, detail="文件内容不是有效图片") from exc

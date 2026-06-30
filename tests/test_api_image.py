@@ -10,6 +10,13 @@ def make_png() -> bytes:
     return buffer.getvalue()
 
 
+def make_broken_png() -> bytes:
+    content = bytearray(make_png())
+    # Keep the PNG signature and chunk layout, but corrupt the image data CRC.
+    content[-8] ^= 0xFF
+    return bytes(content)
+
+
 def test_image_validation_and_workflow(client):
     invalid = client.post(
         "/api/tasks/image",
@@ -29,6 +36,13 @@ def test_image_validation_and_workflow(client):
         data={"supplement": "two sum: nums and target"},
     )
     assert disguised.status_code == 400
+
+    broken_png = client.post(
+        "/api/tasks/image",
+        files={"image": ("problem.png", make_broken_png(), "image/png")},
+        data={"supplement": "two sum: nums and target"},
+    )
+    assert broken_png.status_code == 400
 
     missing_key_and_text = client.post(
         "/api/tasks/image",

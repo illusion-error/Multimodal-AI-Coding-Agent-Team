@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir -r /tmp/backend-requirements.txt
 
 COPY ai_coding_agent_bailian.py ./
 COPY benchmark_data.json ./
+COPY agent/ ./agent/
 COPY backend/ ./backend/
 COPY sandbox/ ./sandbox/
 
