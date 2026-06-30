@@ -234,7 +234,7 @@ const loadData = async () => {
       return
     }
 
-    // 获取 Agent 步骤
+    // 获取 Agent 步骤（失败不影响主流程）
     try {
       const stepsRes = await getTaskSteps(taskId)
       if (stepsRes.data.code === 0) {
@@ -245,7 +245,7 @@ const loadData = async () => {
       agentSteps.value = []
     }
 
-    // 获取 Trace（暂时禁用，避免 CORS）
+    // 获取 Trace（失败不影响主流程）
     try {
       const traceRes = await getTaskTrace(taskId)
       if (traceRes.data.code === 0) {

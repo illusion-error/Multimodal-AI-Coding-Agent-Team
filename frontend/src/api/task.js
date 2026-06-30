@@ -10,17 +10,23 @@ const api = axios.create({
 // ===== 基础接口 =====
 export const healthCheck = () => api.get('/api/health')
 
-export const createTextTask = (problemText) => {
-  return api.post('/api/tasks/text', { problem_text: problemText })
+export const createTextTask = (problemText, apiKey = '') => {
+  const headers = {}
+  if (apiKey) {
+    headers['X-DashScope-API-Key'] = apiKey
+  }
+  return api.post('/api/tasks/text', { problem_text: problemText }, { headers })
 }
 
-export const createImageTask = (imageFile, supplementText = '') => {
+export const createImageTask = (imageFile, supplementText = '', apiKey = '') => {
   const formData = new FormData()
   formData.append('image', imageFile)
   formData.append('supplement', supplementText)
-  return api.post('/api/tasks/image', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  })
+  const headers = { 'Content-Type': 'multipart/form-data' }
+  if (apiKey) {
+    headers['X-DashScope-API-Key'] = apiKey
+  }
+  return api.post('/api/tasks/image', formData, { headers })
 }
 
 // ===== 任务相关 =====
@@ -41,15 +47,20 @@ export const getTaskRepairs = (taskId) => api.get(`/api/tasks/${taskId}/repairs`
 export const getMetricsSummary = () => api.get('/api/metrics/summary')
 
 // ===== 重新执行 =====
-export const rerunTask = (taskId) => api.post(`/api/tasks/${taskId}/rerun`)
+export const rerunTask = (taskId, apiKey = '') => {
+  const headers = {}
+  if (apiKey) {
+    headers['X-DashScope-API-Key'] = apiKey
+  }
+  return api.post(`/api/tasks/${taskId}/rerun`, {}, { headers })
+}
 
 // ===== Trace 详情 =====
 export const getTaskTrace = (taskId) => api.get(`/api/tasks/${taskId}/trace`)
 
 // ===== Prompt 版本 =====
-export const getPromptVersions = (agentName = '') => {
-  const url = agentName ? `/api/prompt/versions?agent_name=${agentName}` : '/api/prompt/versions'
-  return api.get(url)
+export const getPromptVersions = () => {
+  return api.get('/api/prompt/versions')
 }
 export const updatePromptVersion = (agentName, version) => {
   return api.post('/api/prompt/version', { agent_name: agentName, version })
@@ -113,9 +124,9 @@ export const handleApiError = (error, defaultMessage = '请求失败') => {
 }
 
 // ===== 图片上传封装 =====
-export const uploadImageWithFallback = async (imageFile, supplementText = '') => {
+export const uploadImageWithFallback = async (imageFile, supplementText = '', apiKey = '') => {
   try {
-    const response = await createImageTask(imageFile, supplementText)
+    const response = await createImageTask(imageFile, supplementText, apiKey)
     return response
   } catch (error) {
     if (error.response && error.response.status === 404) {

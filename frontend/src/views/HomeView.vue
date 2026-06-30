@@ -1,17 +1,15 @@
 <template>
   <div class="home-container">
-    <!-- 大标题 -->
     <div class="hero">
       <h1 class="hero-title">多模态代码生成 Agent</h1>
       <p class="hero-sub">输入编程题目，AI 自动生成解法、执行测试、输出报告</p>
     </div>
 
-    <!-- 控制栏 -->
     <div v-if="stage2Enabled" class="control-bar">
       <div class="control-group">
         <span class="control-label">Prompt 版本</span>
         <el-select v-model="selectedPromptVersion" placeholder="选择版本" size="small" style="width: 140px">
-          <el-option v-for="v in promptVersions" :key="v.version" :label="v.version + (v.is_active ? ' ✓' : '')" :value="v.version" />
+          <el-option v-for="v in promptVersions" :key="v.version" :label="v.version + (v.is_enabled ? ' ✓' : '')" :value="v.version" />
         </el-select>
         <el-button size="small" type="primary" @click="applyPromptVersion">应用</el-button>
       </div>
@@ -21,7 +19,6 @@
       </div>
     </div>
 
-    <!-- 输入卡片 -->
     <div class="glass-card input-area">
       <div class="api-key-row">
         <el-input
@@ -71,13 +68,11 @@
       </div>
     </div>
 
-    <!-- 进度 -->
     <div v-if="loading" class="progress-section">
       <el-progress :percentage="progress" :status="progressStatus" />
       <p class="progress-hint">{{ progressHint }}</p>
     </div>
 
-    <!-- 结果 -->
     <div v-if="result && !loading" class="result-section">
       <el-alert v-if="result.semantic_verification_status === 'manual_review'" title="代码已运行，但题型缺少系统权威测试，模型建议用例未参与自动修复，请人工确认题意与结果。" type="warning" :closable="false" show-icon class="semantic-alert" />
       <el-alert v-else-if="result.semantic_verification_status === 'verified'" title="语义契约与系统权威测试均已通过。" type="success" :closable="false" show-icon class="semantic-alert" />
@@ -258,7 +253,7 @@ const deployItems = computed(() => {
     { label: '代码长度', value: result.value?.code_length || 0, unit: '字符' },
   ]
   if (stage2Enabled) {
-    items.push({ label: '使用模型', value: result.value?.model_name || '—', unit: '' })
+    items.push({ label: '使用模型', value: result.value?.selected_model || result.value?.model_name || '—', unit: '' })
     items.push({ label: 'Prompt 版本', value: result.value?.prompt_version || '—', unit: '' })
   }
   return items
@@ -275,11 +270,11 @@ const loadPromptVersions = async () => {
     const response = await getPromptVersions()
     if (response.data.code === 0) {
       promptVersions.value = response.data.data || []
-      const active = promptVersions.value.find(v => v.is_active)
+      const active = promptVersions.value.find(v => v.is_enabled)
       if (active) selectedPromptVersion.value = active.version
     }
   } catch {
-    promptVersions.value = [{ version: 'v1.0', is_active: true }]
+    promptVersions.value = [{ version: 'v1.0', is_enabled: true }]
     selectedPromptVersion.value = 'v1.0'
   }
 }
@@ -287,7 +282,7 @@ const loadPromptVersions = async () => {
 const applyPromptVersion = async () => {
   if (!selectedPromptVersion.value) { ElMessage.warning('请选择版本'); return }
   try {
-    await updatePromptVersion('all', selectedPromptVersion.value)
+    await updatePromptVersion('CodeGenerator', selectedPromptVersion.value)
     ElMessage.success(`已切换到 Prompt 版本 ${selectedPromptVersion.value}`)
   } catch { ElMessage.error('切换版本失败') }
 }
@@ -399,10 +394,10 @@ const submitTask = async () => {
       finalResult.api_call = Boolean(finalResult.api_call)
       finalResult.fallback_used = Boolean(finalResult.fallback_used)
       finalResult.notes = finalResult.notes || '请确保输入符合题目要求，代码在 Python 3.10+ 环境中运行。'
-      finalResult.model_name = finalResult.model_name || finalResult.metrics?.text_model || '—'
+      finalResult.selected_model = finalResult.selected_model || finalResult.model_name || '—'
       finalResult.prompt_version = finalResult.prompt_version || selectedPromptVersion.value || '—'
       result.value = finalResult
-      currentModel.value = finalResult.model_name
+      currentModel.value = finalResult.selected_model
 
       const followUpRequests = [fetchAgentSteps(taskId.value), fetchTaskArtifacts(taskId.value)]
       if (stage2Enabled) followUpRequests.push(fetchTraceData(taskId.value))
@@ -478,7 +473,7 @@ const handleRerun = async () => {
       const finalResult = await pollTaskStatus(taskId.value)
       finalResult.code_length = finalResult.code ? finalResult.code.length : 0
       result.value = finalResult
-      currentModel.value = finalResult.model_name || finalResult.metrics?.text_model || '—'
+      currentModel.value = finalResult.selected_model || finalResult.model_name || '—'
       const followUpRequests = [fetchAgentSteps(taskId.value), fetchTaskArtifacts(taskId.value)]
       if (stage2Enabled) followUpRequests.push(fetchTraceData(taskId.value))
       await Promise.all(followUpRequests)
