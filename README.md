@@ -1,78 +1,96 @@
 # Multimodal AI Coding Agent Team
 
-多模态代码生成 Agent 工程。系统支持文本题目和题目截图，使用阿里云百炼模型完成题意识别、RAG 检索、解题规划、测试生成、代码生成、执行调试和报告输出。
+一个面向编程题场景的多模态代码生成 Agent 系统。用户可以输入算法题文本，或上传题目截图并补充说明；系统会完成题意识别、RAG 模板检索、解题规划、测试生成、代码生成、自动执行、失败修复、Trace 记录和报告输出。
 
-## 核心能力
+本项目不是简单调用大模型返回代码，而是把一次代码生成任务拆成可追踪、可测试、可复盘的工程流程，适合作为课程答辩和 Agent 项目面试展示。
 
-- 5 个 Agent：题目识别、解题规划、测试生成、代码生成、执行调试。
-- 轻量 RAG：生成代码前检索算法模板。
-- 失败修复：执行失败后最多自动修复 3 轮。
-- Vue 3 前端、FastAPI 后端和 SQLite 历史记录。
-- 文本及图片任务、状态轮询、Agent Timeline、测试记录和报告下载。
-- 浏览器请求级百炼 API Key，不写入任务历史、报告或数据库。
-- 图片真实格式、尺寸和体积校验，拒绝伪装图片。
-- 统一受限执行器与逐用例自动评测器。
-- 模型不可用时使用本地算法模板完成确定性修复。
-- 可在题目框粘贴待调试的 Python 代码，页面提供稳定自动修复示例。
-- 题目识别后生成不可变语义契约，固定函数签名、输入、输出类型和正确性规则。
-- 语义契约带指纹并贯穿规划、测试、代码生成和调试，后续 Agent 不能静默改写。
-- 已识别题型使用系统权威测试，模型不能把“返回下标”改成布尔判断，也不能把兜底提示当成期望值。
-- 模型生成测试经过参数数量、返回类型、契约编号、指纹和占位文本校验；未知题型的模型用例只作建议，不进入自动修复闭环。
-- 疑似 `????` 的损坏输入会被拒绝，不再污染历史记录和后续 Agent。
-- 5 道真实 Benchmark 跑批及结果持久化。
-- Docker Compose 部署和 GitHub Actions 自动测试。
-- 无 API Key 时使用离线兜底，仍能完整演示流程。
+## 功能概览
+
+| 模块 | 已实现能力 |
+| --- | --- |
+| 多模态输入 | 支持文本题目和 PNG/JPEG/WebP 题目截图；图片会校验真实格式、尺寸和体积 |
+| 5 Agent 工作流 | 题目识别、解题规划、测试生成、代码生成、执行调试 |
+| RAG 模板库 | 生成代码前检索算法模板，覆盖哈希、二分、动态规划、图搜索、栈、滑动窗口等 |
+| 自动测试 | 生成代码后按用例逐条执行，统计通过率、失败原因和耗时 |
+| 失败修复 | 执行失败后进入调试修复循环，默认最多 3 轮 |
+| 语义防漂移 | 锁定题目契约、函数签名、返回类型和测试来源，避免模型把题意改偏 |
+| Trace 可观测 | 保存节点、工具调用、耗时、错误、缓存命中等过程数据 |
+| 历史与报告 | 保存任务历史，支持 Markdown/JSON/Python 下载 |
+| Benchmark | 支持 30 题跑批评测，输出对比报告 |
+| Docker 部署 | 支持 Docker Compose 一键启动前后端 |
+
+## 技术架构
+
+```text
+Vue3 + Element Plus 前端
+        |
+        v
+FastAPI 后端接口
+        |
+        v
+SQLite 任务库 / 队列 / Trace / 缓存
+        |
+        v
+5 Agent 工作流
+        |
+        +--> RAG 算法模板检索
+        +--> 百炼 OpenAI 兼容接口
+        +--> 离线兜底算法模板
+        |
+        v
+受限代码执行器 + 自动评测器
+        |
+        v
+任务详情 / Agent Timeline / Trace / Benchmark / 报告下载
+```
 
 ## 项目结构
 
 ```text
 .
-├── ai_coding_agent_bailian.py   # 唯一 Agent/RAG 业务实现
+├── ai_coding_agent_bailian.py      # Agent/RAG/兜底代码生成核心逻辑
+├── agent/                          # 状态机、工具注册表、RAG、Prompt、契约模块
 ├── backend/
-│   ├── main.py                  # FastAPI 接口
-│   ├── database.py              # SQLite 数据访问
-│   ├── requirements.txt
+│   ├── main.py                     # FastAPI 接口与任务入口
+│   ├── database.py                 # SQLite 表结构、迁移、读写函数
+│   ├── worker.py                   # SQLite 队列 worker
 │   └── Dockerfile
-├── frontend/                    # Vue 3 + Element Plus
+├── frontend/                       # Vue3 + Element Plus 前端
 ├── sandbox/
-│   ├── code_runner.py           # 第一阶段受限子进程执行器
-│   ├── evaluator.py             # 结构化测试评测
-│   └── benchmark_runner.py      # 真实 Benchmark 跑批
-├── tests/                       # pytest 自动化测试
-├── benchmark_data.json
+│   ├── code_runner.py              # 受限执行器
+│   ├── evaluator.py                # 逐用例评测器
+│   └── benchmark_runner.py         # Benchmark 跑批
+├── tests/                          # 后端与沙盒 pytest
+├── benchmark_data.json             # 30 题 Benchmark 题库
 ├── docker-compose.yml
 └── .env.example
 ```
 
-## 环境要求
+## 快速运行
+
+### 1. 准备环境
+
+需要：
 
 - Python 3.10+
 - Node.js 20+
-- Docker Desktop，可选
+- Docker Desktop，可选但推荐
 
-## 配置
-
-复制环境模板：
+复制环境变量模板：
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-在本地 `.env` 中填写：
+可选填写百炼 API Key：
 
 ```text
-DASHSCOPE_API_KEY=你的百炼APIKey
+DASHSCOPE_API_KEY=你的百炼 API Key
 ```
 
-不要提交 `.env`。没有 API Key 时系统会自动使用离线兜底。
+没有 API Key 也能运行，系统会使用离线兜底算法模板完成演示。页面输入框填写的 API Key 只通过当前请求头传给后端，不会写入数据库、日志或报告。
 
-也可以直接在 Vue 首页的“百炼 API Key”输入框中填写。页面填写的 Key
-只通过当前任务请求头传给后端，刷新页面后清空，不会写入数据库和日志。
-上传截图并要求视觉识别时必须提供 Key；没有 Key 时需要同时填写题目补充说明。
-
-## 本地运行
-
-### 后端
+### 2. 启动后端
 
 ```powershell
 python -m pip install -r backend/requirements.txt
@@ -85,7 +103,7 @@ python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 http://127.0.0.1:8000/docs
 ```
 
-### 前端
+### 3. 启动前端
 
 ```powershell
 cd frontend
@@ -101,93 +119,9 @@ npm run dev
 http://127.0.0.1:5173
 ```
 
-### Streamlit 单文件版
+## Docker Compose 一键启动
 
 ```powershell
-python -m pip install -r requirements.txt
-streamlit run ai_coding_agent_bailian.py
-```
-
-## 第一阶段接口
-
-```text
-GET  /api/health
-POST /api/tasks/text
-POST /api/tasks/image
-GET  /api/tasks
-GET  /api/tasks/{id}
-GET  /api/tasks/{id}/steps
-GET  /api/tasks/{id}/tests
-GET  /api/tasks/{id}/repairs
-GET  /api/tasks/{id}/report
-POST /api/tasks/{id}/rerun
-GET  /api/metrics/summary
-```
-
-`POST /api/tasks/text`、`POST /api/tasks/image` 和重跑接口支持请求头：
-
-```text
-X-DashScope-API-Key: 你的百炼 API Key
-```
-
-图片接口只接受真实 PNG、JPEG、WebP 文件，最大 10MB、最大 2500 万像素。
-
-工程化接口已启用，包含 Benchmark、Prompt 版本和 Trace：
-
-```text
-GET /api/benchmark/results
-POST /api/benchmark/runs
-GET /api/benchmark/runs/{run_id}
-GET /api/prompt/versions
-POST /api/prompt/version
-GET /api/tasks/{task_id}/trace
-```
-
-前端默认展示 Prompt 版本、Trace 详情和 Benchmark 面板，本地运行时建议设置：
-
-```text
-VITE_ENABLE_STAGE2=true
-```
-
-## Benchmark
-
-执行真实题库跑批：
-
-```powershell
-python -m sandbox.benchmark_runner
-```
-
-只运行、不写入数据库：
-
-```powershell
-python -m sandbox.benchmark_runner --no-persist
-```
-
-跑批会逐题调用 Agent、逐用例执行代码，并将摘要和明细写入统一 SQLite 数据库。
-当前 `docs/benchmark_comparison.md` 记录的是离线兜底 baseline，用于证明评测链路可运行；如果要在答辩中展示“模型效果提升”，需要使用有效百炼 Key 重新跑批或继续扩展算法模板覆盖率。
-
-## 自动测试
-
-```powershell
-python -m pip install -r requirements-dev.txt
-pytest
-```
-
-前端构建：
-
-```powershell
-cd frontend
-npm ci
-npm test -- --run
-npm run build
-```
-
-`npm audit --omit=dev` 应为 0 个生产依赖漏洞。当前全量 `npm audit` 可能提示 Vite/esbuild 的开发服务器相关漏洞；它不进入生产 Nginx 静态镜像，但如需满足严格审计，可升级 Vite 主版本后重新构建验证。
-
-## Docker Compose
-
-```powershell
-docker compose config
 docker compose build
 docker compose up -d
 docker compose ps
@@ -208,227 +142,126 @@ docker compose down
 
 SQLite 数据通过 `backend_data` 卷持久化。
 
+## 主要接口
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/health` | 健康检查 |
+| POST | `/api/tasks/text` | 提交文本题目 |
+| POST | `/api/tasks/image` | 提交题目截图 |
+| GET | `/api/tasks` | 查询任务历史 |
+| GET | `/api/tasks/{task_id}` | 查询任务详情 |
+| GET | `/api/tasks/{task_id}/steps` | 查询 5 Agent 输出 |
+| GET | `/api/tasks/{task_id}/tests` | 查询自动测试结果 |
+| GET | `/api/tasks/{task_id}/repairs` | 查询修复记录 |
+| GET | `/api/tasks/{task_id}/trace` | 查询 Trace 节点和工具调用 |
+| GET | `/api/tasks/{task_id}/report` | 下载 Markdown 报告 |
+| POST | `/api/tasks/{task_id}/rerun` | 重跑任务 |
+| POST | `/api/tasks/{task_id}/cancel` | 取消任务 |
+| GET | `/api/prompt/versions` | 查询 Prompt 版本 |
+| POST | `/api/prompt/version` | 切换指定 Agent Prompt 版本 |
+| POST | `/api/benchmark/runs` | 启动 Benchmark 跑批 |
+| GET | `/api/benchmark/runs/{run_id}` | 查询 Benchmark 状态 |
+| GET | `/api/benchmark/results` | 查询最近 Benchmark 结果 |
+
+提交文本题目示例：
+
+```json
+{
+  "problem_text": "给定整数数组 nums 和目标值 target，请返回两数之和的下标。"
+}
+```
+
+如需按请求临时使用百炼 Key，可在请求头中加入：
+
+```text
+X-DashScope-API-Key: 你的百炼 API Key
+```
+
+## 测试与验收
+
+后端和沙盒测试：
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+前端测试与构建：
+
+```powershell
+cd frontend
+npm ci
+npm test -- --run
+npm run build
+npm audit --omit=dev
+```
+
+当前验收结果：
+
+| 类型 | 当前结果 |
+| --- | --- |
+| 后端/沙盒 pytest | 47 passed |
+| 前端 Vitest | 3 passed |
+| 前端生产构建 | 通过 |
+| 生产依赖 audit | 0 漏洞 |
+| 30 题 Benchmark | Offline_Fallback 100.0%，Online_Bailian 100.0% |
+| Docker Compose | 前后端容器 healthy |
+| 容器内任务执行 | 文本任务 completed，生成 code 与 trace |
+
+说明：全量 `npm audit` 可能提示 Vite/esbuild 的开发服务器相关漏洞，该依赖不进入生产 Nginx 静态镜像；如需严格审计，可升级 Vite 主版本后重新验证。
+
+## Benchmark
+
+运行 30 题 Benchmark：
+
+```powershell
+python -m sandbox.benchmark_runner
+```
+
+只跑批、不写入数据库：
+
+```powershell
+python -m sandbox.benchmark_runner --no-persist
+```
+
+Benchmark 会逐题调用 Agent、执行代码、统计通过率，并生成：
+
+```text
+docs/benchmark_comparison.md
+```
+
+当前离线兜底模板已覆盖 30 道 Benchmark 题，本地最近一次跑批结果为 Offline_Fallback 100.0%、Online_Bailian 100.0%。无 API Key 时也能展示完整跑批链路；接入有效百炼 Key 后，可继续对比模型生成与离线模板的效果、耗时和成本。
+
+## 演示建议
+
+答辩时建议按下面顺序演示：
+
+1. 首页输入 two sum 文本题，展示生成代码、测试通过率和报告下载。
+2. 上传题目截图，补充题意说明，展示图片任务链路。
+3. 打开 Agent Timeline，说明 5 个 Agent 的输入输出。
+4. 打开 Trace 详情，说明节点耗时、工具调用和错误记录。
+5. 打开 Benchmark 页面，说明 30 题跑批、通过率和工程指标。
+6. 展示 Docker Compose 启动结果，说明部署方式。
+
+## 项目亮点
+
+- 从单文件 Demo 升级为前后端分离系统。
+- 从“模型直接给代码”升级为 5 Agent 可追踪工作流。
+- 从普通 Prompt 生成升级为 RAG 模板增强生成。
+- 从“程序能跑”升级为逐用例自动评测、失败修复和报告输出。
+- 从黑盒执行升级为 Trace、工具调用、缓存、Prompt 版本和 Benchmark 可观测。
+- 在没有 API Key 或接口失败时，仍能用离线兜底模板完成稳定演示。
+
 ## 安全说明
 
-第一阶段执行器使用 AST 检查、临时目录、隔离模式 Python、最小环境变量、超时和输出限制。它适合课程项目和受控算法代码，但不等同于操作系统级安全边界。
+本项目执行器包含 AST 检查、临时目录、超时、输出截断、危险调用拦截等保护，适合课程项目和受控算法代码执行。若要运行不可信用户代码，建议启用 Docker Sandbox 或 E2B，并继续限制网络、CPU、内存、进程数和文件系统权限。
 
-已收录题型只有在代码退出码为 0 且系统权威测试全部通过时才会标记为
-`completed`。未知题型可以完成代码可运行性检查，但会明确显示“需人工确认”，
-模型建议用例不会计入测试通过率，也不会触发自动修复。权威测试失败会标记为
-`failed`，页面仍会展示代码、Agent 步骤、失败用例和修复记录。
+## 旧版 Streamlit 单文件运行
 
-第二阶段面向不可信代码时，应切换到 Docker Sandbox 或 E2B，并限制网络、CPU、内存、进程数和文件系统权限。
+仓库仍保留单文件版本，便于快速演示或对比：
 
-## 接口字段说明
-
-| 接口路径 | 方法 | 功能 | 请求字段 | 响应字段 |
-|---------|------|------|---------|---------|
-| `/api/health` | GET | 健康检查 | 无 | `{status, agent_loaded, database, version}` |
-| `/api/tasks/text` | POST | 文本任务提交 | `{problem_text}` | `{task_id, status}` |
-| `/api/tasks/image` | POST | 图片任务提交 | `image`(文件), `supplement`(可选) | `{task_id, status, filename, size}` |
-| `/api/tasks` | GET | 获取所有任务列表 | 无 | `[{task_id, status, input_type, created_at, ...}]` |
-| `/api/tasks/{task_id}` | GET | 获取单个任务详情 | 路径: `task_id` | `{task_id, status, problem, data, ...}` |
-| `/api/tasks/{task_id}/steps` | GET | 获取 Agent 执行步骤 | 路径: `task_id` | `[{step_id, agent_name, status, input, output, duration_ms}]` |
-| `/api/tasks/{task_id}/tests` | GET | 获取测试用例结果 | 路径: `task_id` | `[{test_id, input, expected, actual, passed, ...}]` |
-| `/api/tasks/{task_id}/repairs` | GET | 获取修复记录 | 路径: `task_id` | `[{log_id, repair_round, error_msg, repair_success, ...}]` |
-| `/api/tasks/{task_id}/report` | GET | 下载任务报告(Markdown) | 路径: `task_id` | 返回 `.md` 文件 |
-| `/api/tasks/{task_id}/rerun` | POST | 重新执行任务 | 路径: `task_id` | `{task_id, status, original_task_id}` |
-| `/api/metrics/summary` | GET | 获取统计指标 | 无 | `{total_tasks, success_rate, avg_response_time, ...}` |
-| `/api/tasks/{task_id}/cancel` | POST | 取消任务 | 路径: `task_id` | `{task_id, status}` |
-| `/api/benchmark/results` | GET | 获取最近跑批结果 | 无 | `{run_id, total, passed, pass_rate, details, ...}` |
-| `/api/prompt/versions` | GET | 获取 Prompt 版本列表 | `agent_name`(可选) | `[{id, agent_name, version, is_enabled, change_log, created_at}]` |
-| `/api/prompt/version` | POST | 切换 Prompt 版本 | `{agent_name, version}` | `{agent_name, version}` |
-| `/api/tasks/{task_id}/trace` | GET | 获取任务执行追踪 | 路径: `task_id` | `{task, nodes: [...], tool_calls: [...]}` |
-| `/api/benchmark/runs` | POST | 启动跑批 | 无 | `{run_id, status}` |
-| `/api/benchmark/runs/{run_id}` | GET | 查询跑批状态 | 路径: `run_id` | `{run_id, status, progress, total, completed, failed}` |
-
-## 接口请求/响应 JSON 示例
-
-以下示例展示部分接口的典型请求与响应格式。
-
-### 1. POST /api/prompt/version
-
-请求示例：
-
-```json
-{
-  "agent_name": "CodeGenerator",
-  "version": "v2.0"
-}
-```
-
-响应示例（成功）：
-
-```json
-{
-  "code": 0,
-  "message": "已切换到版本 v2.0",
-  "data": {
-    "agent_name": "CodeGenerator",
-    "version": "v2.0"
-  }
-}
-```
-
-响应示例（版本不存在）：
-
-```json
-{
-  "code": 404,
-  "message": "版本不存在",
-  "data": null
-}
-```
-
-### 2. GET /api/tasks/{task_id}/trace
-
-响应示例（存在 Trace 数据）：
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "task": {
-      "task_id": "abc-123-def",
-      "trace_id": "trace-456"
-    },
-    "nodes": [
-      {
-        "id": 1,
-        "node_name": "Agent_Workflow_Start",
-        "node_type": "workflow",
-        "status": "running",
-        "start_time": "2026-06-27T00:00:00.000",
-        "end_time": null,
-        "duration_ms": null
-      },
-      {
-        "id": 2,
-        "node_name": "Planner",
-        "node_type": "agent",
-        "status": "completed",
-        "start_time": "2026-06-27T00:00:01.000",
-        "end_time": "2026-06-27T00:00:02.000",
-        "duration_ms": 1000
-      }
-    ],
-    "tool_calls": []
-  }
-}
-```
-
-响应示例（任务不存在）：
-
-```json
-{
-  "code": 404,
-  "message": "任务不存在",
-  "data": null
-}
-```
-
-### 3. POST /api/benchmark/runs
-
-响应示例：
-
-```json
-{
-  "code": 0,
-  "message": "跑批任务已启动",
-  "data": {
-    "run_id": "f1501a36-1234-5678-9abc-def012345678",
-    "status": "running"
-  }
-}
-```
-
-### 4. GET /api/benchmark/runs/{run_id}
-
-响应示例（running 状态）：
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "run_id": "f1501a36-1234-5678-9abc-def012345678",
-    "status": "running",
-    "progress": 0,
-    "total": 5,
-    "completed": 0,
-    "failed": 0,
-    "passed": 0
-  }
-}
-```
-
-响应示例（completed 状态）：
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "run_id": "f1501a36-1234-5678-9abc-def012345678",
-    "status": "completed",
-    "progress": 100,
-    "total": 5,
-    "passed": 5,
-    "failed": 0,
-    "pass_rate": 100.0,
-    "avg_duration": 1500.5,
-    "started_at": "2026-06-27T00:00:00.000",
-    "finished_at": "2026-06-27T00:06:00.000"
-  }
-}
-```
-
-响应示例（跑批记录不存在）：
-
-```json
-{
-  "code": 404,
-  "message": "跑批记录不存在",
-  "data": null
-}
-```
-
-### 5. POST /api/tasks/{task_id}/cancel
-
-**请求示例**：
-
-无请求体，直接通过路径参数指定任务 ID。
-
-**响应示例（成功取消任务）**：
-
-```json
-{
-  "code": 0,
-  "message": "任务已取消",
-  "data": {
-    "task_id": "abc-123-def",
-    "status": "cancelled"
-  }
-}
-```
-
-**响应示例（任务不存在）**：
-
-```json
-{
-  "code": 404,
-  "message": "任务不存在",
-  "data": null
-}
-```
-
-**响应示例（无法取消）**：
-
-```json
-{
-  "code": 409,
-  "message": "任务状态为 completed，无法取消（只能取消 running 或 queued 状态）",
-  "data": null
-}
+```powershell
+python -m pip install -r requirements.txt
+streamlit run ai_coding_agent_bailian.py
 ```
